@@ -19,9 +19,11 @@ jobs:
           - os: windows-latest
             command: build:win
             artifact: windows
+            artifact_glob: dist/*setup.exe
           - os: macos-15-intel
             command: build:mac
             artifact: macos-intel
+            artifact_glob: dist/*.dmg
 
     steps:
       - name: Checkout repository
@@ -36,15 +38,13 @@ jobs:
         run: npm ci
 
       - name: Package Electron app
-        run: npm run ${{ matrix.command }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run ${{ matrix.command }} -- --publish never
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: electron-build-${{ matrix.artifact }}
-          path: dist/** # electron-builder output folder
+          path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
   release:
@@ -63,7 +63,6 @@ jobs:
           files: |
             dist/**/*.dmg
             dist/**/*setup.exe
-            dist/**/latest*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
