@@ -51,10 +51,6 @@ function composeCustomPrompt(scenes: PromptScene[], activeSceneId: string): stri
 
 interface Settings {
   // theme: 'light' | 'dark'an
-  apiBaseURL: string
-  apiKey: string
-  model: string
-  customModels: string[]
   customPrompt: string
 
   scenes: PromptScene[]
@@ -64,8 +60,6 @@ interface Settings {
 
   screenshotAutoSave: boolean
   screenshotDir: string
-
-  dashscopeApiKey: string
 
   hideDockIcon: boolean
 
@@ -83,10 +77,6 @@ interface SettingsStore extends Settings {
 }
 
 const defaultSettings: Settings = {
-  apiBaseURL: '',
-  apiKey: '',
-  model: '',
-  customModels: [],
   customPrompt: PRESET_SCENE_PROMPTS[CODING_SCENE_ID],
   scenes: createPresetScenes(),
   activeSceneId: CODING_SCENE_ID,
@@ -95,8 +85,6 @@ const defaultSettings: Settings = {
 
   screenshotAutoSave: false,
   screenshotDir: '',
-
-  dashscopeApiKey: '',
 
   hideDockIcon: false,
 

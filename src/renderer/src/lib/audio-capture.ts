@@ -3,19 +3,23 @@ import { useSettingsStore } from '@/lib/store/settings'
 let mediaStream: MediaStream | null = null
 let audioContext: AudioContext | null = null
 let processor: ScriptProcessorNode | null = null
+let silentGain: GainNode | null = null
 
-function downsampleAndSend(float32: Float32Array): void {
-  const int16 = new Int16Array(float32.length)
-  for (let i = 0; i < float32.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32[i]))
+function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
+  const ratio = sourceRate / 16000
+  const length = ratio > 1 ? Math.max(1, Math.floor(float32.length / ratio)) : float32.length
+  const int16 = new Int16Array(length)
+  for (let i = 0; i < length; i++) {
+    const sourceIndex = ratio > 1 ? Math.min(float32.length - 1, Math.floor(i * ratio)) : i
+    const s = Math.max(-1, Math.min(1, float32[sourceIndex]))
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
   }
   window.api.sendTranscriptionAudioChunk(int16.buffer)
 }
 
-async function openMicrophoneStream(deviceId: string): Promise<MediaStream> {
+async function openMicrophoneStream(deviceId?: string): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({
-    audio: { deviceId: { exact: deviceId } },
+    audio: deviceId ? { deviceId: { exact: deviceId } } : true,
     video: false
   })
 }
@@ -26,6 +30,10 @@ async function openSystemAudioStream(): Promise<MediaStream> {
     video: true
   })
   stream.getVideoTracks().forEach((t) => t.stop())
+  if (stream.getAudioTracks().length === 0) {
+    stream.getTracks().forEach((t) => t.stop())
+    throw new Error('当前系统无法捕获系统音频')
+  }
   return stream
 }
 
@@ -37,11 +45,16 @@ export async function startAudioCapture(): Promise<void> {
     try {
       stream = await openMicrophoneStream(audioInputDeviceId)
     } catch (err) {
-      console.warn('Failed to open selected microphone, falling back to system audio:', err)
-      stream = await openSystemAudioStream()
+      console.warn('Failed to open selected microphone, falling back to default microphone:', err)
+      stream = await openMicrophoneStream()
     }
   } else {
-    stream = await openSystemAudioStream()
+    try {
+      stream = await openSystemAudioStream()
+    } catch (err) {
+      console.warn('Failed to capture system audio, falling back to microphone:', err)
+      stream = await openMicrophoneStream()
+    }
   }
 
   mediaStream = stream
@@ -60,18 +73,27 @@ export async function startAudioCapture(): Promise<void> {
 
   const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
 
-  processor = audioContext.createScriptProcessor(2048, 1, 1)
+  // 1024 samples at 16 kHz is about 64 ms. This keeps streaming latency low
+  // without creating excessive IPC/WebSocket overhead.
+  processor = audioContext.createScriptProcessor(1024, 1, 1)
   processor.onaudioprocess = (e) => {
-    downsampleAndSend(e.inputBuffer.getChannelData(0))
+    downsampleAndSend(e.inputBuffer.getChannelData(0), e.inputBuffer.sampleRate)
   }
+  silentGain = audioContext.createGain()
+  silentGain.gain.value = 0
   source.connect(processor)
-  processor.connect(audioContext.destination)
+  processor.connect(silentGain)
+  silentGain.connect(audioContext.destination)
 }
 
 export function stopAudioCapture(): void {
   if (processor) {
     processor.disconnect()
     processor = null
+  }
+  if (silentGain) {
+    silentGain.disconnect()
+    silentGain = null
   }
   if (audioContext) {
     audioContext.close()

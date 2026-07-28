@@ -6,10 +6,11 @@ import SettingsPage from '@/settings'
 import HelpPage from '@/help'
 import { useSettingsStore } from '@/lib/store/settings'
 import { useShortcutsStore } from '@/lib/store/shortcuts'
-import { getCloneableFields } from '@/lib/utils'
+import { AccountDialog } from '@/account/AccountDialog'
 
 export default function App() {
   const [initialized, setInitialized] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const settingsStore = useSettingsStore()
   const { shortcuts } = useShortcutsStore()
 
@@ -33,16 +34,29 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const openAccount = () => setAccountOpen(true)
+    window.addEventListener('offerget:open-account', openAccount)
+    return () => window.removeEventListener('offerget:open-account', openAccount)
+  }, [])
+
+  useEffect(() => {
     if (initialized) {
-      window.api.updateAppSettings(getCloneableFields(settingsStore))
+      window.api.updateAppSettings({
+        opacity: settingsStore.opacity,
+        screenshotAutoSave: settingsStore.screenshotAutoSave,
+        screenshotDir: settingsStore.screenshotDir,
+        hideDockIcon: settingsStore.hideDockIcon,
+        audioInputDeviceId: settingsStore.audioInputDeviceId,
+        audioOutputDeviceId: settingsStore.audioOutputDeviceId,
+        customPrompt: settingsStore.customPrompt
+      })
     }
   }, [initialized, settingsStore])
 
   useEffect(() => {
-    console.log('App initShortcuts:', shortcuts) // DEBUG: 检查新键
     window.api.initShortcuts(shortcuts)
     window.api.getShortcuts().then((shortcutsStatus) => {
-      console.log('Shortcuts registered:', shortcutsStatus) // DEBUG: 主进程状态
+      console.log('Shortcuts registered:', shortcutsStatus)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -58,6 +72,7 @@ export default function App() {
       </HashRouter>
 
       <Toaster />
+      <AccountDialog open={accountOpen} onOpenChange={setAccountOpen} />
     </>
   )
 }

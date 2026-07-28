@@ -3,8 +3,15 @@ import { useShortcutsStore } from '@/lib/store/shortcuts'
 import { useSolutionStore } from '@/lib/store/solution'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import ShortcutRenderer from '@/components/ShortcutRenderer'
+import { InterviewStartPanel } from './InterviewStartPanel'
 
 const SCROLL_OFFSET = 120
+type InterviewAccess = 'loading' | 'logged-out' | 'not-started' | 'active'
+
+type EntitlementSnapshot = {
+  user?: { email: string }
+  activeSession?: { expiresAt: string } | null
+}
 
 export function AppContent() {
   const {
@@ -19,6 +26,34 @@ export function AppContent() {
   } = useSolutionStore()
 
   const [recentScreenshots, setRecentScreenshots] = useState<string[]>([])
+  const [interviewAccess, setInterviewAccess] = useState<InterviewAccess>('loading')
+
+  useEffect(() => {
+    const applyEntitlements = (data: EntitlementSnapshot | null | undefined) => {
+      if (!data?.user) {
+        setInterviewAccess('logged-out')
+        return
+      }
+      const active =
+        data.activeSession &&
+        new Date(data.activeSession.expiresAt).getTime() > Date.now()
+      setInterviewAccess(active ? 'active' : 'not-started')
+    }
+    const refreshAccess = async () => {
+      const result = await window.api.getEntitlements()
+      applyEntitlements(result.ok ? result.data : null)
+    }
+    const handleUpdated = (event: Event) => {
+      applyEntitlements((event as CustomEvent<EntitlementSnapshot | null>).detail)
+    }
+    void refreshAccess()
+    window.addEventListener('offerget:entitlements-updated', handleUpdated)
+    window.addEventListener('offerget:auth-changed', refreshAccess)
+    return () => {
+      window.removeEventListener('offerget:entitlements-updated', handleUpdated)
+      window.removeEventListener('offerget:auth-changed', refreshAccess)
+    }
+  }, [])
 
   useEffect(() => {
     // Listen for screenshot events (latest)
@@ -112,9 +147,11 @@ export function AppContent() {
 
   return (
     <div id="app-content" className="px-6 py-4">
+      <InterviewStartPanel />
+
       {/* Error Banner */}
       {errorMessage && (
-        <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg flex items-start gap-3">
+        <div className="mb-4 mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg flex items-start gap-3">
           <svg
             className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5"
             fill="none"
@@ -129,7 +166,7 @@ export function AppContent() {
             />
           </svg>
           <div className="flex-1 min-w-0">
-            <p className="text-red-400 font-medium text-sm">API 调用失败</p>
+            <p className="text-red-400 font-medium text-sm">暂时无法完成操作</p>
             <p className="text-red-300/80 text-sm mt-0.5 break-words">{errorMessage}</p>
           </div>
           <button
@@ -171,7 +208,7 @@ export function AppContent() {
           />
         </div>
       ) : (
-        <ShortcutTip />
+        <ShortcutTip access={interviewAccess} />
       )}
 
       {/* Solution Display */}
@@ -180,16 +217,29 @@ export function AppContent() {
   )
 }
 
-function ShortcutTip() {
+function ShortcutTip({ access }: { access: InterviewAccess }) {
   const { shortcuts } = useShortcutsStore()
+
+  if (access !== 'active') {
+    return (
+      <div className="flex min-h-56 items-center justify-center text-lg text-slate-400 select-none">
+        {access === 'logged-out'
+          ? '登录并开始面试后可使用截图识别'
+          : access === 'loading'
+            ? '正在检查面试状态…'
+            : '开始面试后可使用截图识别'}
+      </div>
+    )
+  }
+
   return (
-    <div className="flex items-center justify-center h-full text-xl text-gray-400 select-none">
-      请按下快捷键
+    <div className="flex min-h-56 items-center justify-center text-xl text-gray-400 select-none">
+      按下快捷键
       <ShortcutRenderer
         shortcut={shortcuts.takeScreenshot.key}
         className="mx-1 font-bold text-black"
       />
-      抓取屏幕进行分析
+      截图识题
     </div>
   )
 }

@@ -6,11 +6,12 @@
   }
   body {
     @apply text-foreground;
+    background: #0a1020;
   }
 }
 
 #app-header {
-  @apply h-9 bg-gray-700/80 text-white;
+  @apply h-12 border-b border-white/10 bg-slate-950/85 px-3 text-white shadow-lg shadow-slate-950/20 backdrop-blur-xl;
   -webkit-app-region: drag;
   .actions {
     -webkit-app-region: no-drag;
@@ -18,7 +19,69 @@
 }
 
 #app-content {
-  @apply h-[calc(100vh-36px)] overflow-y-auto bg-gray-500;
+  @apply h-[calc(100vh-48px)] overflow-y-auto;
+  background:
+    radial-gradient(circle at 82% -12%, rgba(255, 119, 38, 0.18), transparent 30%),
+    linear-gradient(145deg, #e7edf6 0%, #f7f9fc 48%, #eaf0f9 100%);
+}
+
+.interview-mode #app-content {
+  @apply h-screen;
+}
+
+.interview-drag-strip {
+  @apply absolute inset-x-0 top-0 z-30 h-3;
+  -webkit-app-region: drag;
+}
+
+.offerget-brand {
+  @apply flex min-w-0 items-center gap-2.5;
+  -webkit-app-region: drag;
+}
+
+.offerget-brand-mark {
+  @apply flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-orange-300/30 bg-slate-900 shadow-sm;
+}
+
+.offerget-brand-mark img {
+  @apply size-full object-cover;
+}
+
+.offerget-brand-copy {
+  @apply flex items-baseline gap-1 font-semibold tracking-tight;
+}
+
+.offerget-brand-copy span {
+  @apply text-orange-400;
+}
+
+.offerget-header-actions {
+  @apply ml-auto flex items-center gap-1;
+  -webkit-app-region: no-drag;
+}
+
+.offerget-interview-panel {
+  @apply flex items-center justify-between gap-6 rounded-2xl border border-slate-200/80 bg-white/90 p-5 text-slate-900 shadow-lg shadow-slate-300/30;
+}
+
+.offerget-interview-panel.is-active {
+  @apply border-orange-300/70 bg-orange-50/95 shadow-orange-200/30;
+}
+
+.offerget-interview-eyebrow {
+  @apply mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-orange-600;
+}
+
+.offerget-interview-panel h2 {
+  @apply text-xl font-semibold tracking-tight;
+}
+
+.offerget-interview-panel p {
+  @apply mt-1 text-sm text-slate-500;
+}
+
+.offerget-primary-action {
+  @apply h-11 shrink-0 rounded-xl bg-orange-500 px-5 font-semibold text-white shadow-md shadow-orange-500/20 hover:bg-orange-400;
 }
 
 .transcription-scroll {

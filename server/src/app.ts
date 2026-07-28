@@ -1,0 +1,609 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import Fastify, { FastifyRequest } from 'fastify'
+import cors from '@fastify/cors'
+import WebSocket, { WebSocketServer } from 'ws'
+import type { EmailSender } from './email'
+import type { AsrConnection, AsrProvider } from './asr'
+import type { VisionProvider } from './vision'
+
+type ProductCode = 'single_session' | 'ten_session'
+export type User = { id: string; email: string; createdAt: string }
+export type Session = {
+  id: string
+  userId: string
+  kind: 'trial' | 'paid'
+  startedAt: string
+  expiresAt: string
+  stoppedAt?: string
+}
+export type Order = {
+  orderNo: string
+  userId: string
+  productCode: ProductCode
+  amountFen: number
+  status: 'pending' | 'paid'
+  passesGranted: number
+  expiresAt: string
+  fulfilledAt?: string
+}
+type EmailCode = { hash: string; expiresAt: number; attempts: number; lastSentAt: number }
+export type PassBalance = { count: number; expiresAt: number }
+type AsrSession = {
+  id: string
+  practiceSessionId: string
+  userId: string
+  expiresAt: string
+  billed: boolean
+}
+type AsrTicket = {
+  ticket: string
+  asrSession: AsrSession
+  expiresAt: number
+  consumed: boolean
+}
+
+const PRODUCTS: Record<ProductCode, { amountFen: number; passes: number; passDays: number }> = {
+  single_session: { amountFen: 990, passes: 1, passDays: 30 },
+  ten_session: { amountFen: 8800, passes: 10, passDays: 90 }
+}
+const now = () => Date.now()
+const iso = (ms = now()) => new Date(ms).toISOString()
+const id = (prefix: string) => `${prefix}_${randomBytes(12).toString('hex')}`
+const validEmail = (email: unknown): email is string =>
+  typeof email === 'string' && /^[^\s@]+@qq\.com$/i.test(email.trim())
+const normalizeEmail = (email: string) => email.trim().toLowerCase()
+
+export class MemoryRepository {
+  usersByEmail = new Map<string, User>()
+  users = new Map<string, User>()
+  codes = new Map<string, EmailCode>()
+  refreshTokens = new Map<string, string>()
+  trialUsed = new Set<string>()
+  voiceUses = new Map<string, number>()
+  passes = new Map<string, PassBalance[]>()
+  sessions = new Map<string, Session>()
+  orders = new Map<string, Order>()
+  checkoutKeys = new Map<string, string>()
+  asrStartKeys = new Map<string, AsrTicket>()
+  asrTickets = new Map<string, AsrTicket>()
+  asrConnecting = new Set<string>()
+  activeAsrSessions = new Map<string, AsrSession>()
+  asrClosers = new Map<string, () => void>()
+  paidEvents = new Set<string>()
+  screenshotRequests = new Map<string, string>()
+
+  async persist() {}
+
+  async health() {
+    return { database: false, persistent: false }
+  }
+
+  async close() {}
+}
+
+function error(
+  reply: { code: (n: number) => unknown },
+  status: number,
+  code: string,
+  message: string
+) {
+  return (reply.code(status) as { send: (body: unknown) => unknown }).send({
+    error: { code, message }
+  })
+}
+
+export function buildApp(
+  options: {
+    secret?: string
+    devCodes?: boolean
+    repository?: MemoryRepository
+    emailSender?: EmailSender
+    asrProvider?: AsrProvider
+    visionProvider?: VisionProvider
+  } = {}
+) {
+  const secret = options.secret ?? process.env.APP_SECRET ?? 'local-development-secret'
+  const devCodes = options.devCodes ?? process.env.DEV_EMAIL_CODES !== 'false'
+  const repo = options.repository ?? new MemoryRepository()
+  const emailSender = options.emailSender
+  const asrProvider = options.asrProvider
+  const visionProvider = options.visionProvider
+  const app = Fastify({ logger: false })
+  void app.register(cors, { origin: process.env.CORS_ORIGIN ?? true })
+
+  const hash = (value: string) => createHmac('sha256', secret).update(value).digest('hex')
+  const sign = (payload: Record<string, unknown>) => {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+    return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`
+  }
+  const verify = (token: string) => {
+    const [body, signature] = token.split('.')
+    if (!body || !signature) return undefined
+    const expected = createHmac('sha256', secret).update(body).digest('base64url')
+    if (
+      signature.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+    )
+      return undefined
+    try {
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
+        sub: string
+        exp: number
+      }
+      return payload.exp > now() ? payload : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const tokenPair = (user: User) => {
+    const accessToken = sign({ sub: user.id, exp: now() + 15 * 60_000 })
+    const refreshToken = id('rt')
+    repo.refreshTokens.set(hash(refreshToken), user.id)
+    return { accessToken, refreshToken, user }
+  }
+  const getUser = (request: FastifyRequest) => {
+    const token = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1]
+    const payload = token && verify(token)
+    return payload ? repo.users.get(payload.sub) : undefined
+  }
+  const requireUser = (
+    request: FastifyRequest,
+    reply: Parameters<typeof error>[0]
+  ): User | undefined => {
+    const user = getUser(request)
+    if (!user) error(reply, 401, 'AUTH_REQUIRED', '请先登录')
+    return user
+  }
+  const activeSession = (userId: string) =>
+    [...repo.sessions.values()].find(
+      (s) => s.userId === userId && !s.stoppedAt && Date.parse(s.expiresAt) > now()
+    )
+  const activePasses = (userId: string) =>
+    (repo.passes.get(userId) ?? []).filter((p) => p.expiresAt > now() && p.count > 0)
+  const entitlement = (user: User) => ({
+    user,
+    trial: {
+      screenshot: { used: repo.trialUsed.has(user.id), durationMinutes: 45 },
+      voice: { remaining: Math.max(0, 3 - (repo.voiceUses.get(user.id) ?? 0)), durationMinutes: 15 }
+    },
+    passes: { available: activePasses(user.id).reduce((sum, pass) => sum + pass.count, 0) },
+    screenshotTrial: { used: repo.trialUsed.has(user.id), durationMinutes: 45 },
+    voiceTrial: {
+      remaining: Math.max(0, 3 - (repo.voiceUses.get(user.id) ?? 0)),
+      durationMinutes: 15
+    },
+    sessionPasses: activePasses(user.id).reduce((sum, pass) => sum + pass.count, 0),
+    activeSession: activeSession(user.id) ?? null,
+    features: {
+      voiceRecognition: Boolean(asrProvider),
+      screenshotRecognition: Boolean(visionProvider)
+    },
+    serverTime: iso()
+  })
+
+  const pendingVoiceReservations = (userId: string) =>
+    [...repo.asrTickets.values()].filter(
+      (ticket) =>
+        ticket.asrSession.userId === userId &&
+        !ticket.consumed &&
+        ticket.expiresAt > now() &&
+        !ticket.asrSession.billed
+    ).length
+
+  const asrWebSocketServer = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false
+  })
+  app.server.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url || '/', 'http://127.0.0.1')
+    if (url.pathname !== '/v1/asr-stream') return
+    asrWebSocketServer.handleUpgrade(request, socket, head, (client) => {
+      asrWebSocketServer.emit('connection', client, request)
+    })
+  })
+
+  asrWebSocketServer.on('connection', (client, request) => {
+    const url = new URL(request.url || '/', 'http://127.0.0.1')
+    const ticketId = url.searchParams.get('ticket')
+    const ticket = ticketId ? repo.asrTickets.get(ticketId) : undefined
+    if (
+      !ticket ||
+      ticket.consumed ||
+      ticket.expiresAt <= now() ||
+      !asrProvider
+    ) {
+      client.send(
+        JSON.stringify({
+          type: 'error',
+          message: !asrProvider ? '服务器尚未配置语音识别服务' : '语音连接凭证无效或已过期'
+        })
+      )
+      client.close()
+      return
+    }
+
+    ticket.consumed = true
+    repo.asrConnecting.add(ticket.asrSession.practiceSessionId)
+    let upstream: AsrConnection | null = null
+    let expiryTimer: NodeJS.Timeout | null = null
+    let closed = false
+    const closeAll = () => {
+      if (closed) return
+      closed = true
+      if (expiryTimer) clearTimeout(expiryTimer)
+      upstream?.close()
+      repo.asrConnecting.delete(ticket.asrSession.practiceSessionId)
+      if (
+        repo.activeAsrSessions.get(ticket.asrSession.practiceSessionId)?.id ===
+        ticket.asrSession.id
+      )
+        repo.activeAsrSessions.delete(ticket.asrSession.practiceSessionId)
+      repo.asrClosers.delete(ticket.asrSession.practiceSessionId)
+      if (client.readyState === WebSocket.OPEN) client.close()
+    }
+    const send = (message: unknown) => {
+      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify(message))
+    }
+    repo.asrClosers.set(ticket.asrSession.practiceSessionId, () => {
+      upstream?.finish()
+      send({ type: 'stopped', reason: 'interview-ended' })
+      closeAll()
+    })
+
+    void asrProvider
+      .connect({
+        onTranscript: (text, isPartial) => send({ type: 'transcript', text, isPartial }),
+        onError: (message) => {
+          send({ type: 'error', message })
+          closeAll()
+        },
+        onFinished: () => {
+          send({ type: 'stopped' })
+          closeAll()
+        }
+      })
+      .then(async (connection) => {
+        if (closed) {
+          connection.close()
+          repo.asrTickets.delete(ticket.ticket)
+          return
+        }
+        const practice = repo.sessions.get(ticket.asrSession.practiceSessionId)
+        if (
+          !practice ||
+          practice.stoppedAt ||
+          Date.parse(practice.expiresAt) <= now()
+        ) {
+          connection.close()
+          send({ type: 'error', message: '面试已结束，语音识别已停止' })
+          closeAll()
+          return
+        }
+        if (practice.kind === 'trial') {
+          const used = repo.voiceUses.get(ticket.asrSession.userId) ?? 0
+          if (used >= 3) {
+            connection.close()
+            send({ type: 'error', message: '免费语音次数已用完' })
+            closeAll()
+            return
+          }
+          repo.voiceUses.set(ticket.asrSession.userId, used + 1)
+          ticket.asrSession.billed = true
+        }
+        upstream = connection
+        repo.asrConnecting.delete(ticket.asrSession.practiceSessionId)
+        repo.activeAsrSessions.set(ticket.asrSession.practiceSessionId, ticket.asrSession)
+        repo.asrTickets.delete(ticket.ticket)
+        await repo.persist()
+        const expiresIn = Math.max(0, Date.parse(ticket.asrSession.expiresAt) - now())
+        expiryTimer = setTimeout(() => {
+          upstream?.finish()
+          send({ type: 'stopped', reason: 'expired' })
+          closeAll()
+        }, expiresIn)
+        send({ type: 'ready', asrSession: ticket.asrSession })
+      })
+      .catch((connectionError) => {
+        repo.asrTickets.delete(ticket.ticket)
+        send({
+          type: 'error',
+          message:
+            connectionError instanceof Error ? connectionError.message : '语音识别服务连接失败'
+        })
+        closeAll()
+      })
+
+    client.on('message', (data, isBinary) => {
+      if (isBinary) {
+        upstream?.sendAudio(Buffer.from(data as Buffer))
+        return
+      }
+      try {
+        const message = JSON.parse(data.toString()) as { type?: string }
+        if (message.type === 'stop') upstream?.finish()
+      } catch {
+        send({ type: 'error', message: '无法识别的语音控制消息' })
+      }
+    })
+    client.on('close', closeAll)
+    client.on('error', closeAll)
+  })
+
+  app.addHook('onClose', async () => {
+    for (const client of asrWebSocketServer.clients) client.terminate()
+    asrWebSocketServer.close()
+    await repo.close()
+  })
+
+  app.get('/health', async (_request, reply) => {
+    try {
+      const persistence = await repo.health()
+      return {
+        status: 'ok',
+        version: process.env.APP_VERSION || 'development',
+        dependencies: {
+          database: persistence.database,
+          smtp: Boolean(emailSender),
+          voice: Boolean(asrProvider),
+          vision: Boolean(visionProvider)
+        },
+        persistent: persistence.persistent
+      }
+    } catch {
+      return error(reply, 503, 'DATABASE_UNAVAILABLE', '数据库连接不可用')
+    }
+  })
+
+  app.post('/v1/auth/send-email-code', async (request, reply) => {
+    const { email } = (request.body ?? {}) as { email?: unknown }
+    if (!validEmail(email)) return error(reply, 400, 'INVALID_EMAIL', '仅支持 QQ 邮箱')
+    const normalized = normalizeEmail(email)
+    const old = repo.codes.get(normalized)
+    if (old && now() - old.lastSentAt < 60_000)
+      return error(reply, 429, 'RATE_LIMITED', '请 60 秒后再试')
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    if (!emailSender && !devCodes)
+      return error(reply, 503, 'EMAIL_UNAVAILABLE', '邮件服务暂不可用，请稍后重试')
+    if (emailSender) {
+      try {
+        await emailSender.sendVerificationCode({
+          to: normalized,
+          code,
+          expiresInMinutes: 5
+        })
+      } catch (sendError) {
+        request.log.error(sendError)
+        return error(reply, 502, 'EMAIL_SEND_FAILED', '验证码邮件发送失败，请稍后重试')
+      }
+    }
+    repo.codes.set(normalized, {
+      hash: hash(code),
+      expiresAt: now() + 5 * 60_000,
+      attempts: 0,
+      lastSentAt: now()
+    })
+    return { sent: true, ...(devCodes ? { devCode: code } : {}) }
+  })
+  app.post('/v1/auth/verify-email-code', async (request, reply) => {
+    const { email, code } = (request.body ?? {}) as { email?: unknown; code?: unknown }
+    if (!validEmail(email)) return error(reply, 400, 'INVALID_EMAIL', '仅支持 QQ 邮箱')
+    const saved = repo.codes.get(normalizeEmail(email))
+    if (!saved || saved.expiresAt <= now()) return error(reply, 400, 'CODE_EXPIRED', '验证码已过期')
+    saved.attempts += 1
+    if (saved.attempts > 5 || typeof code !== 'string' || saved.hash !== hash(code))
+      return error(reply, 400, 'CODE_EXPIRED', '验证码无效')
+    repo.codes.delete(normalizeEmail(email))
+    let user = repo.usersByEmail.get(normalizeEmail(email))
+    if (!user) {
+      user = { id: id('usr'), email: normalizeEmail(email), createdAt: iso() }
+      repo.usersByEmail.set(user.email, user)
+      repo.users.set(user.id, user)
+    }
+    const tokens = tokenPair(user)
+    await repo.persist()
+    return tokens
+  })
+  app.post('/v1/auth/refresh', async (request, reply) => {
+    const { refreshToken } = (request.body ?? {}) as { refreshToken?: unknown }
+    if (typeof refreshToken !== 'string') return error(reply, 401, 'AUTH_REQUIRED', '刷新令牌无效')
+    const key = hash(refreshToken)
+    const userId = repo.refreshTokens.get(key)
+    repo.refreshTokens.delete(key)
+    const user = userId && repo.users.get(userId)
+    if (!user) return error(reply, 401, 'AUTH_REQUIRED', '刷新令牌无效')
+    const tokens = tokenPair(user)
+    await repo.persist()
+    return tokens
+  })
+  app.get('/v1/me/entitlements', async (request, reply) => {
+    const user = requireUser(request, reply)
+    return user ? entitlement(user) : undefined
+  })
+  app.post('/v1/practice-sessions/start', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const existing = activeSession(user.id)
+    if (existing) return { session: existing, reused: true }
+    let kind: Session['kind']
+    if (!repo.trialUsed.has(user.id)) {
+      repo.trialUsed.add(user.id)
+      kind = 'trial'
+    } else {
+      const pass = activePasses(user.id)[0]
+      if (!pass) return error(reply, 403, 'NO_ENTITLEMENT', '没有可用次卡')
+      pass.count -= 1
+      kind = 'paid'
+    }
+    const duration = kind === 'trial' ? 45 : 60
+    const session: Session = {
+      id: id('ps'),
+      userId: user.id,
+      kind,
+      startedAt: iso(),
+      expiresAt: iso(now() + duration * 60_000)
+    }
+    repo.sessions.set(session.id, session)
+    await repo.persist()
+    return { session, reused: false }
+  })
+  app.post('/v1/practice-sessions/:id/stop', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const session = repo.sessions.get((request.params as { id: string }).id)
+    if (!session || session.userId !== user.id)
+      return error(reply, 404, 'NO_ACTIVE_SESSION', '练习会话不存在')
+    session.stoppedAt = iso()
+    repo.asrClosers.get(session.id)?.()
+    await repo.persist()
+    return { session }
+  })
+  app.post('/v1/asr-trials/start', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    if (!asrProvider)
+      return error(reply, 503, 'ASR_UNAVAILABLE', '服务器尚未配置语音识别服务')
+    const { sessionId } = (request.body ?? {}) as { sessionId?: string }
+    const session = sessionId && repo.sessions.get(sessionId)
+    if (!session || session.userId !== user.id || session.stoppedAt)
+      return error(reply, 403, 'NO_ACTIVE_SESSION', '需要活跃练习会话')
+    if (Date.parse(session.expiresAt) <= now())
+      return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
+    if (
+      repo.asrConnecting.has(session.id) ||
+      repo.activeAsrSessions.has(session.id)
+    )
+      return error(reply, 409, 'ASR_ALREADY_ACTIVE', '本场面试的语音识别已在运行')
+    const idempotencyKey = request.headers['idempotency-key']
+    const requestKey = typeof idempotencyKey === 'string' ? `${user.id}:${idempotencyKey}` : undefined
+    const existing = requestKey && repo.asrStartKeys.get(requestKey)
+    if (existing && existing.expiresAt > now() && !existing.consumed)
+      return {
+        asrSession: existing.asrSession,
+        streamTicket: existing.ticket,
+        reused: true
+      }
+    if (session.kind === 'trial') {
+      const used = repo.voiceUses.get(user.id) ?? 0
+      const pending = pendingVoiceReservations(user.id)
+      if (used + pending >= 3)
+        return error(reply, 403, 'NO_ENTITLEMENT', '免费语音次数已用完')
+    }
+    const asrSession: AsrSession = {
+      id: id('asr'),
+      practiceSessionId: session.id,
+      userId: user.id,
+      expiresAt:
+        session.kind === 'paid'
+          ? session.expiresAt
+          : iso(Math.min(Date.parse(session.expiresAt), now() + 15 * 60_000)),
+      billed: false
+    }
+    const ticket: AsrTicket = {
+      ticket: id('ast'),
+      asrSession,
+      expiresAt: now() + 60_000,
+      consumed: false
+    }
+    repo.asrTickets.set(ticket.ticket, ticket)
+    if (requestKey) repo.asrStartKeys.set(requestKey, ticket)
+    return { asrSession, streamTicket: ticket.ticket, reused: false }
+  })
+  app.post('/v1/checkout-sessions', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const { productCode } = (request.body ?? {}) as { productCode?: ProductCode }
+    const product = productCode && PRODUCTS[productCode]
+    if (!product) return error(reply, 400, 'ORDER_NOT_FOUND', '商品不存在')
+    const key = request.headers['idempotency-key']
+    if (typeof key === 'string' && repo.checkoutKeys.has(`${user.id}:${key}`))
+      return {
+        order: repo.orders.get(repo.checkoutKeys.get(`${user.id}:${key}`)!),
+        payment: { provider: 'mock', qrData: 'mock://reused' }
+      }
+    const order: Order = {
+      orderNo: id('ord'),
+      userId: user.id,
+      productCode,
+      amountFen: product.amountFen,
+      status: 'pending',
+      passesGranted: 0,
+      expiresAt: iso(now() + 15 * 60_000)
+    }
+    repo.orders.set(order.orderNo, order)
+    if (typeof key === 'string') repo.checkoutKeys.set(`${user.id}:${key}`, order.orderNo)
+    await repo.persist()
+    return { order, payment: { provider: 'mock', qrData: `mock://pay/${order.orderNo}` } }
+  })
+  app.get('/v1/orders/:orderNo', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const order = repo.orders.get((request.params as { orderNo: string }).orderNo)
+    return order && order.userId === user.id
+      ? { order }
+      : error(reply, 404, 'ORDER_NOT_FOUND', '订单不存在')
+  })
+  app.post('/v1/dev/orders/:orderNo/mark-paid', async (request, reply) => {
+    if (!devCodes) return error(reply, 404, 'ORDER_NOT_FOUND', '开发接口未启用')
+    const order = repo.orders.get((request.params as { orderNo: string }).orderNo)
+    if (!order) return error(reply, 404, 'ORDER_NOT_FOUND', '订单不存在')
+    if (!repo.paidEvents.has(order.orderNo)) {
+      const product = PRODUCTS[order.productCode]
+      repo.passes.set(order.userId, [
+        ...(repo.passes.get(order.userId) ?? []),
+        { count: product.passes, expiresAt: now() + product.passDays * 86400_000 }
+      ])
+      order.status = 'paid'
+      order.passesGranted = product.passes
+      order.fulfilledAt = iso()
+      repo.paidEvents.add(order.orderNo)
+      await repo.persist()
+    }
+    return { order: repo.orders.get(order.orderNo) }
+  })
+  app.post('/v1/ai/screenshot', { bodyLimit: 30 * 1024 * 1024 }, async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const { sessionId, requestId, image, images, prompt, systemPrompt } = (request.body ?? {}) as {
+      sessionId?: string
+      requestId?: string
+      image?: string
+      images?: string[]
+      prompt?: string
+      systemPrompt?: string
+    }
+    const session = sessionId && repo.sessions.get(sessionId)
+    if (!session || session.userId !== user.id || session.stoppedAt)
+      return error(reply, 403, 'NO_ACTIVE_SESSION', '需要活跃练习会话')
+    if (Date.parse(session.expiresAt) <= now())
+      return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
+    if (!visionProvider)
+      return error(reply, 503, 'VISION_UNAVAILABLE', '服务器尚未配置截图识别模型')
+    const inputImages = Array.isArray(images) ? images : image ? [image] : []
+    if (
+      !requestId ||
+      inputImages.length === 0 ||
+      inputImages.length > 5 ||
+      inputImages.some((value) => typeof value !== 'string' || value.length === 0) ||
+      inputImages.reduce((size, value) => size + value.length, 0) > 25 * 1024 * 1024
+    )
+      return error(reply, 400, 'INVALID_SCREENSHOT', '截图请求参数无效或图片过大')
+    if ((prompt?.length ?? 0) > 20_000 || (systemPrompt?.length ?? 0) > 20_000)
+      return error(reply, 400, 'INVALID_PROMPT', '题目上下文过长')
+
+    const dedupeKey = `${user.id}:${requestId}`
+    const cached = repo.screenshotRequests.get(dedupeKey)
+    if (cached) return { answer: cached, reused: true }
+    try {
+      const answer = await visionProvider.analyze({
+        images: inputImages,
+        prompt: prompt || '请识别并解答截图中的面试题。',
+        systemPrompt
+      })
+      repo.screenshotRequests.set(dedupeKey, answer)
+      return { answer }
+    } catch {
+      return error(reply, 502, 'VISION_PROVIDER_ERROR', '截图识别暂时失败，请稍后重试')
+    }
+  })
+  return app
+}

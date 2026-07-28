@@ -1,5 +1,6 @@
 import 'dotenv/config'
-import { app, BrowserWindow, desktopCapturer, globalShortcut, session } from 'electron'
+import { app, BrowserWindow, desktopCapturer, globalShortcut, nativeImage, session } from 'electron'
+import icon from '../../resources/icon.png?asset'
 
 type AbortLikeError = {
   name?: string
@@ -29,41 +30,54 @@ process.on('uncaughtException', (error) => {
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import './shortcuts'
 import './transcription'
+import './offerget-api'
 import { createWindow } from './main-window'
 import { initAutoUpdater } from './auto-updater'
 import { applyDockVisibility } from './settings'
+
+app.setName('offerGet')
+process.title = 'offerGet'
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.offerget.app')
 
-  // Hide the dock icon up front until the renderer syncs the real preference.
-  // The persisted `hideDockIcon` value lives in the renderer, so the main
-  // process doesn't know it yet at startup. Starting hidden avoids a dock
-  // flash for users who keep it hidden; if disabled, the renderer sync will
-  // show it again once the window mounts.
-  applyDockVisibility(true)
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(nativeImage.createFromPath(icon))
+  }
+
+  // A standard desktop app must remain visible in the Dock/taskbar.
+  applyDockVisibility(false)
 
   // Auto-approve getDisplayMedia for system audio loopback capture
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      if (sources.length > 0) {
-        callback({ video: sources[0], audio: 'loopback' })
-      }
-    })
-  })
+  session.defaultSession.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+        if (sources.length > 0) {
+          callback({
+            video: sources[0],
+            ...(process.platform === 'win32' ? { audio: 'loopback' as const } : {})
+          })
+        }
+      })
+    },
+    { useSystemPicker: process.platform === 'darwin' }
+  )
 
   // Auto-approve microphone access so users can enumerate and select audio input devices
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (['media', 'microphone', 'audio'].includes(permission)) {
+    if (['media', 'microphone', 'audio', 'display-capture'].includes(permission)) {
       callback(true)
     } else {
       callback(false)
     }
   })
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+    ['media', 'microphone', 'audio', 'display-capture'].includes(permission)
+  )
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.

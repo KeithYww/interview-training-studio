@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { useSettingsStore } from '@/lib/store/settings'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '@/lib/store/app'
 import { useTranscriptionStore } from '@/lib/store/transcription'
 import { useSolutionStore } from '@/lib/store/solution'
@@ -8,28 +7,53 @@ import { startAudioCapture, stopAudioCapture } from '@/lib/audio-capture'
 import { AppHeader } from './AppHeader'
 import { AppContent } from './AppContent'
 import { AppStatusBar } from './AppStatusBar'
-import { PrerequisitesChecker } from './PrerequisitesChecker'
 import { TranscriptionBar } from './TranscriptionBar'
 
 export default function CoderPage() {
-  const { opacity, dashscopeApiKey } = useSettingsStore()
+  const [interviewActive, setInterviewActive] = useState(false)
   const { syncAppState } = useAppStore()
   const { isTranscribing, setIsTranscribing, setTranscriptionText, clearText } =
     useTranscriptionStore()
   const { setErrorMessage } = useSolutionStore()
 
   useEffect(() => {
-    document.body.style.opacity = opacity.toString()
-    return () => {
-      document.body.style.opacity = ''
-    }
-  }, [opacity])
-
-  useEffect(() => {
     window.api.updateAppState({ inCoderPage: true })
     return () => {
       window.api.updateAppState({ inCoderPage: false })
     }
+  }, [])
+
+  useEffect(() => {
+    const applyEntitlements = (
+      data:
+        | { activeSession?: { expiresAt: string } | null }
+        | null
+        | undefined
+    ) => {
+      const active =
+        data?.activeSession &&
+        new Date(data.activeSession.expiresAt).getTime() > Date.now()
+      const isActive = Boolean(active)
+      setInterviewActive(isActive)
+      void window.api.updateAppState({ interviewActive: isActive })
+      if (!isActive && useTranscriptionStore.getState().isTranscribing) {
+        stopAudioCapture()
+        void window.api.stopTranscription()
+        useTranscriptionStore.getState().setIsTranscribing(false)
+      }
+    }
+    const refresh = async () => {
+      const result = await window.api.getEntitlements()
+      applyEntitlements(result.ok ? result.data : null)
+    }
+    const handleUpdated = (event: Event) => {
+      applyEntitlements(
+        (event as CustomEvent<{ activeSession?: { expiresAt: string } | null }>).detail
+      )
+    }
+    void refresh()
+    window.addEventListener('offerget:entitlements-updated', handleUpdated)
+    return () => window.removeEventListener('offerget:entitlements-updated', handleUpdated)
   }, [])
 
   useEffect(() => {
@@ -48,28 +72,32 @@ export default function CoderPage() {
         await window.api.stopTranscription()
         setIsTranscribing(false)
       } else {
-        if (!dashscopeApiKey) {
-          setErrorMessage('请先在设置中配置百炼平台 API Key')
-          return
-        }
         try {
+          const entitlement = await window.api.getEntitlements()
+          const sessionId = entitlement.data?.activeSession?.id
+          if (!entitlement.ok || !sessionId) {
+            throw new Error(entitlement.message || '请先在“练习权益”中启动练习会话')
+          }
           await startAudioCapture()
-          await window.api.startTranscription(dashscopeApiKey)
+          await window.api.startTranscription(sessionId)
           setIsTranscribing(true)
           setErrorMessage(null)
+          window.dispatchEvent(new Event('offerget:entitlements-changed'))
         } catch (err) {
           console.error('Failed to start transcription:', err)
           stopAudioCapture()
-          setErrorMessage('启动语音转录失败，请检查系统音频权限')
+          setErrorMessage(err instanceof Error ? err.message : '启动语音转录失败')
         }
       }
     }
 
     window.api.onToggleTranscription(handleToggle)
+    window.addEventListener('offerget:toggle-transcription', handleToggle)
     return () => {
       window.api.removeToggleTranscriptionListener()
+      window.removeEventListener('offerget:toggle-transcription', handleToggle)
     }
-  }, [isTranscribing, dashscopeApiKey, setIsTranscribing, setErrorMessage])
+  }, [isTranscribing, setIsTranscribing, setErrorMessage])
 
   useEffect(() => {
     window.api.onTranscriptionText((data) => {
@@ -105,12 +133,11 @@ export default function CoderPage() {
   }, [])
 
   return (
-    <div className="relative h-screen">
-      <AppHeader />
+    <div className={`relative h-screen ${interviewActive ? 'interview-mode' : ''}`}>
+      {interviewActive ? <div className="interview-drag-strip" aria-hidden="true" /> : <AppHeader />}
       <AppContent />
       <TranscriptionBar />
       <AppStatusBar />
-      <PrerequisitesChecker />
     </div>
   )
 }

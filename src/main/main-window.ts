@@ -3,16 +3,6 @@ import { shell, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
-export function applyContentProtection(window: BrowserWindow, forceReset = false): void {
-  if (!window || window.isDestroyed()) return
-
-  if (forceReset && process.platform === 'win32') {
-    window.setContentProtection(false)
-  }
-
-  window.setContentProtection(true)
-}
-
 export function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -21,12 +11,12 @@ export function createWindow(): void {
     frame: false,
     transparent: true,
     hasShadow: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    hiddenInMissionControl: true,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    hiddenInMissionControl: false,
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -40,23 +30,7 @@ export function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
-    mainWindow.setAlwaysOnTop(true, 'screen-saver', 1)
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-    // Dock visibility is handled at startup (index.ts) and via renderer sync
-    // (settings.ts); the window's own show event must not force it back on.
-    applyContentProtection(mainWindow)
-
-    // Reclaim top position when other apps steal it
-    mainWindow.on('always-on-top-changed', (_event, isAlwaysOnTop) => {
-      if (!isAlwaysOnTop && mainWindow.isVisible() && !mainWindow.isDestroyed()) {
-        // Only re-set the flag; avoid moveTop() to not disturb other window focus
-        mainWindow.setAlwaysOnTop(true, 'screen-saver', 1)
-      }
-    })
-  })
-
-  mainWindow.on('show', () => {
-    applyContentProtection(mainWindow)
+    // Standard visible desktop window; do not hide it from system UI or other apps.
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

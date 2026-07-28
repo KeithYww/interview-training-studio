@@ -3,9 +3,8 @@ import {
   ArrowLeft,
   Lightbulb,
   MessageCircle,
+  Mail,
   Camera,
-  PictureInPicture2,
-  EyeOff,
   Info
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,6 +13,7 @@ import { platformAlt } from '@/lib/utils/env'
 import { HelpSection } from './components'
 import { Shortcuts } from './Shortcuts'
 import { FAQ } from './FAQ'
+import { AccountStatusButton } from '@/account/AccountStatusButton'
 
 export default function HelpPage() {
   return (
@@ -28,6 +28,9 @@ export default function HelpPage() {
           </Button>
         </div>
         <h1>帮助中心</h1>
+        <div className="actions ml-auto">
+          <AccountStatusButton />
+        </div>
       </div>
 
       {/* Help Content */}
@@ -35,36 +38,19 @@ export default function HelpPage() {
         {/* Introduction */}
         <HelpSection Icon={Info} title="简介">
           <p className="text-gray-700">
-            欢迎使用截屏解题助手！无论是 编程面试 / 在线考试 还是其他解题场景，
-            该工具都可以帮助您快速截图，分析屏幕内容，并给出解答建议。 您可以访问本项目{' '}
-            <a
-              href="https://github.com/ooboqoo/interview-coder-cn/wiki"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-            >
-              GitHub Wiki
-            </a>{' '}
-            获取更多帮助信息（如隐身相关配置、API Key 申请等）。
+            offerGet 是模拟面试练习工具。登录后主动开始一场面试，才会开始计时并启用截图识别。
+            模型密钥由服务端安全托管，客户端不会要求你配置 API Key。
           </p>
           <div className="bg-gray-700/10 rounded-lg p-4">
             <h3 className="font-semibold mb-2">主要功能：</h3>
             <ul className="space-y-1 text-gray-700 list-disc list-inside">
               <li className="flex gap-2">
                 <Camera className="h-6 w-4" />
-                <span>通过快捷键快速截图，并生成解题建议。</span>
+                <span>在面试计时期间通过快捷键截图，并生成练习建议。</span>
               </li>
               <li className="flex gap-2">
-                <EyeOff className="h-6 w-4" />
-                <span>
-                  工具窗口在共享屏幕时自动隐藏(对方不可见)(小部分会议软件可能需要配置才能隐藏)。
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <PictureInPicture2 className="h-6 w-4" />
-                <span>
-                  工具窗口置顶半透明显示，您在做题时光标始终停留在做题区域，不会导致原页面失焦。
-                </span>
+                <Info className="h-6 w-4" />
+                <span>面试中可开启实时语音识别，免费用户共 3 次，每次最多 15 分钟。</span>
               </li>
             </ul>
           </div>
@@ -73,15 +59,21 @@ export default function HelpPage() {
         {/* Quick Start */}
         <HelpSection Icon={Lightbulb} title="快速开始">
           <div className="border border-gray-400 rounded-lg p-4">
-            <h3 className="font-semibold mb-2">1. 截取屏幕截图</h3>
+            <h3 className="font-semibold mb-2">1. 登录并开始面试</h3>
             <p className="text-sm text-gray-700">
-              当您需要分析某个问题时，按下快捷键{' '}
+              使用 QQ 邮箱登录，在主页面确认免费体验或次卡权益，然后点击“开始面试”。
+            </p>
+          </div>
+          <div className="border border-gray-400 rounded-lg p-4">
+            <h3 className="font-semibold mb-2">2. 截取屏幕截图</h3>
+            <p className="text-sm text-gray-700">
+              面试开始后，按下快捷键{' '}
               <ShortcutRenderer shortcut={`${platformAlt}+Enter`} className="text-xs mx-1" />
               截取当前屏幕。截图会立即显示在应用中。
             </p>
           </div>
           <div className="border border-gray-400 rounded-lg p-4">
-            <h3 className="font-semibold mb-2">2. 查看结果</h3>
+            <h3 className="font-semibold mb-2">3. 查看结果</h3>
             <p className="text-sm text-gray-700">
               截图完成后，系统会根据当前选择的提示词场景自动分析内容，给出解题思路和答案。
             </p>
@@ -99,18 +91,15 @@ export default function HelpPage() {
           <p className="text-gray-700">如果您遇到问题或有建议，请通过以下方式联系我们：</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div className="border border-gray-400 rounded-lg p-4">
-              <h3 className="font-semibold mb-2 ">GitHub Issues</h3>
+              <h3 className="mb-2 flex items-center gap-2 font-semibold">
+                <Mail className="size-4 text-orange-500" />
+                QQ 邮箱
+              </h3>
               <p className="text-gray-700">
-                在{' '}
-                <a
-                  href="https://github.com/ooboqoo/interview-coder-cn/issues"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-600 hover:underline"
-                >
-                  GitHub Issues
-                </a>{' '}
-                上提交问题报告和功能请求
+                <span className="font-semibold text-gray-900">
+                  794637387@qq.com
+                </span>
+                <span className="ml-2">反馈问题或提出功能建议</span>
               </p>
             </div>
           </div>

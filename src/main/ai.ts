@@ -1,90 +1,49 @@
-import { streamText, type ModelMessage } from 'ai'
-import { createOpenAI } from '@ai-sdk/openai'
-import { settings, AppSettings } from './settings'
+import type { ModelMessage } from './model-message'
+import { offergetApi } from './offerget-api'
+import { settings } from './settings'
 
-// The system prompt is fully managed by the renderer (prompt scenes in the
-// settings store) and synced here via updateAppSettings on app startup
-function getSystemPrompt(extra?: string) {
-  return [settings.customPrompt, extra].filter(Boolean).join('\n\n') || undefined
+function inputFrom(messages: ModelMessage[]) {
+  const images: string[] = []
+  const prompts: string[] = []
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    if (typeof message.content === 'string') prompts.push(message.content)
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part.type === 'text' && 'text' in part && typeof part.text === 'string')
+          prompts.push(part.text)
+        if (part.type === 'image' && 'image' in part && typeof part.image === 'string')
+          images.push(part.image)
+      }
+    }
+  }
+  if (images.length === 0) throw new Error('未找到截图')
+  return { images: images.slice(-5), prompt: prompts.join('\n\n').slice(-20_000) }
 }
 
-function getModel(_settings: AppSettings) {
-  const fallbackModel = settings.apiBaseURL.includes('siliconflow')
-    ? 'Qwen/Qwen3-VL-32B-Instruct'
-    : 'gpt-5-mini'
-  return _settings.model || fallbackModel
+async function* serverSolution(messages: ModelMessage[], abortSignal?: AbortSignal) {
+  if (abortSignal?.aborted) return
+  const session = await offergetApi.activeSession()
+  const { images, prompt } = inputFrom(messages)
+  const answer = await offergetApi.screenshot(
+    session.id,
+    images,
+    prompt,
+    settings.customPrompt,
+    undefined,
+    abortSignal
+  )
+  if (!abortSignal?.aborted) yield answer
 }
 
 export function getSolutionStream(messages: ModelMessage[], abortSignal?: AbortSignal) {
-  const openai = createOpenAI({
-    baseURL: settings.apiBaseURL,
-    apiKey: settings.apiKey
-  })
-
-  const { textStream } = streamText({
-    model: openai.chat(getModel(settings)),
-    system: getSystemPrompt(),
-    messages,
-    abortSignal,
-    onError: (err) => {
-      throw err.error ?? err
-    }
-  })
-  return textStream
+  return serverSolution(messages, abortSignal)
 }
 
-export function getFollowUpStream(
-  messages: ModelMessage[],
-  userQuestion: string,
-  abortSignal?: AbortSignal
-) {
-  const openai = createOpenAI({
-    baseURL: settings.apiBaseURL,
-    apiKey: settings.apiKey
-  })
-
-  // Add the user's follow-up question to the conversation
-  const updatedMessages: ModelMessage[] = [
-    ...messages,
-    {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: userQuestion
-        }
-      ]
-    }
-  ]
-
-  const { textStream } = streamText({
-    model: openai.chat(getModel(settings)),
-    system: getSystemPrompt(),
-    messages: updatedMessages,
-    abortSignal,
-    onError: (err) => {
-      throw err.error ?? err
-    }
-  })
-  return textStream
+export function getFollowUpStream(messages: ModelMessage[], _userQuestion: string, abortSignal?: AbortSignal) {
+  return serverSolution(messages, abortSignal)
 }
 
 export function getGeneralStream(messages: ModelMessage[], abortSignal?: AbortSignal) {
-  const openai = createOpenAI({
-    baseURL: settings.apiBaseURL,
-    apiKey: settings.apiKey
-  })
-
-  const { textStream } = streamText({
-    model: openai.chat(getModel(settings)),
-    system: getSystemPrompt(
-      '注意：如果有多张截图，请结合所有截图内容进行完整分析，不要遗漏任何部分。'
-    ),
-    messages,
-    abortSignal,
-    onError: (err) => {
-      throw err.error ?? err
-    }
-  })
-  return textStream
+  return serverSolution(messages, abortSignal)
 }

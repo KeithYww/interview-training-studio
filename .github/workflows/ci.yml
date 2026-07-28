@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: npm run typecheck
+      - run: npm run server:test
+      - run: npx tsc -p server/tsconfig.json
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: server
+      - run: docker compose --project-name offerget --env-file /dev/null -f deploy/docker-compose.yml config --quiet

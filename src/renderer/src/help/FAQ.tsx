@@ -28,16 +28,8 @@ const faqs = [
     question: '分享屏幕时，对方能看到应用吗？',
     answer: (
       <span>
-        工具窗口在共享屏幕时自动隐藏(对方不可见)，但小部分会议软件可能需要配置才能隐藏。所以如果你对隐身功能有需求，务必在正式使用前用「当前电脑」+「当前会议软件」测试一下。更多细节请参考{' '}
-        <a
-          href="https://github.com/ooboqoo/interview-coder-cn/wiki/隐身配置"
-          target="_blank"
-          rel="noreferrer"
-          className="text-blue-600 hover:underline"
-        >
-          GitHub Wiki
-        </a>
-        。
+        当前版本不能保证 offerGet 窗口在所有会议软件和共享模式中隐藏。
+        正式面试前请使用当前电脑和实际会议软件完成一次共享测试，并避免共享包含应用窗口的整个桌面。
       </span>
     )
   },
@@ -55,10 +47,10 @@ const faqs = [
     question: '语音转录功能是什么？如何使用？',
     answer: (
       <span>
-        语音转录功能可以实时将面试官的语音或题目朗读转为文字，辅助 AI
-        更好地理解题意。使用前需在「设置」中配置百炼平台 API Key，然后按下
+        面试开始后，点击“开始语音识别”或按下
         <ShortcutRenderer shortcut={`${platformAlt}+T`} className="text-xs mx-1" />
-        开始/暂停转录。转录文本会在截图时自动附带提交给 AI。
+        即可开始或停止。免费用户共 3 次，每次最多 15 分钟；付费面试在本场剩余时间内不额外扣次。
+        语音供应商密钥由 offerGet 服务端保管，客户端不需要填写第三方 API Key。
       </span>
     )
   },
@@ -68,7 +60,7 @@ const faqs = [
       <span>
         可以。按下
         <ShortcutRenderer shortcut={`${platformAlt}+Shift+T`} className="text-xs mx-1" />
-        即可清除当前转录文本，清除后的文本不会提交给 AI。截图时也会自动清除已有转录文本。
+        即可清除当前转录文本。截图生成建议后，也会自动清除已经使用的语音文本。
       </span>
     )
   }

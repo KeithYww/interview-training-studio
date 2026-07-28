@@ -1,0 +1,31 @@
+{
+  default_sni {$SITE_ADDRESS}
+}
+
+https://{$SITE_ADDRESS} {
+  tls /etc/letsencrypt/live/{$SITE_ADDRESS}/fullchain.pem /etc/letsencrypt/live/{$SITE_ADDRESS}/privkey.pem
+
+  encode zstd gzip
+
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+  }
+
+  handle_path /api/* {
+    reverse_proxy backend:3001
+  }
+
+  handle /downloads/* {
+    root * /downloads
+    file_server
+  }
+
+  handle {
+    root * /srv
+    file_server
+  }
+}

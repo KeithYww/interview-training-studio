@@ -1,0 +1,97 @@
+name: Deploy China Production
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: Full commit SHA to deploy; defaults to main
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offerget-china-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    env:
+      CHINA_URL: https://43.142.15.246:8443
+      SSH_HOST: ${{ secrets.CHINA_SSH_HOST }}
+      SSH_USER: ${{ secrets.CHINA_SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.CHINA_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.CHINA_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Resolve release SHA
+        id: release
+        env:
+          REQUESTED_SHA: ${{ inputs.deploy_sha }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          sha="${REQUESTED_SHA:-${WORKFLOW_SHA:-}}"
+          if [ -z "$sha" ]; then
+            sha="$(git ls-remote https://github.com/${{ github.repository }}.git refs/heads/main | awk '{print $1}')"
+          fi
+          test "${#sha}" = '40'
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+      - name: Build immutable release archive
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          tar --create --gzip --file "/tmp/offerget-$DEPLOY_SHA.tar.gz" \
+            --exclude='.git' --exclude='node_modules' --exclude='dist' \
+            --exclude='.env' --exclude='.env.*' .
+      - name: Configure pinned SSH access
+        run: |
+          set -euo pipefail
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/offerget_deploy
+          chmod 600 ~/.ssh/offerget_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Deploy exact SHA
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          remote_archive="/tmp/offerget-$DEPLOY_SHA.tar.gz"
+          ssh_opts=(-i ~/.ssh/offerget_deploy -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          scp "${ssh_opts[@]}" "/tmp/offerget-$DEPLOY_SHA.tar.gz" "$SSH_USER@$SSH_HOST:$remote_archive"
+          ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
+            "DEPLOY_SHA='$DEPLOY_SHA' ARCHIVE_PATH='$remote_archive' PUBLIC_ORIGIN='$CHINA_URL' sh -s" \
+            < deploy/remote-release.sh
+      - name: Production smoke test
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+            --connect-timeout 20 --max-time 120 "$CHINA_URL/" >/dev/null
+          health="$(curl --fail --silent --show-error --retry 5 --retry-all-errors \
+            --connect-timeout 20 --max-time 120 "$CHINA_URL/api/health")"
+          test "$(jq -r '.status' <<<"$health")" = 'ok'
+          test "$(jq -r '.version' <<<"$health")" = "$DEPLOY_SHA"
+          test "$(jq -r '.dependencies.database' <<<"$health")" = 'true'
+          test "$(jq -r '.dependencies.smtp' <<<"$health")" = 'true'
+          test "$(jq -r '.dependencies.voice' <<<"$health")" = 'true'
+          test "$(jq -r '.dependencies.vision' <<<"$health")" = 'true'

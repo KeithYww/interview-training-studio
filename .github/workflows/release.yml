@@ -53,9 +53,38 @@ jobs:
         with:
           draft: true
           files: |
-            dist/**/interview-coder-cn-*.dmg
-            dist/**/interview-coder-cn-*.exe
-            dist/**/latest-mac.yml
-            dist/**/latest-windows.yml
+            dist/**/*.dmg
+            dist/**/*setup.exe
+            dist/**/latest*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure China deployment SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CHINA_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CHINA_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/offerget_deploy
+          chmod 600 ~/.ssh/offerget_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Publish installers to China download service
+        env:
+          SSH_HOST: ${{ secrets.CHINA_SSH_HOST }}
+          SSH_USER: ${{ secrets.CHINA_SSH_USER }}
+        run: |
+          set -euo pipefail
+          dmg="$(find dist -type f -name '*.dmg' | head -1)"
+          exe="$(find dist -type f -name '*setup.exe' | head -1)"
+          test -f "$dmg"
+          test -f "$exe"
+          ssh_opts=(-i ~/.ssh/offerget_deploy -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          scp "${ssh_opts[@]}" "$dmg" "$SSH_USER@$SSH_HOST:/tmp/offerGet-mac.dmg"
+          scp "${ssh_opts[@]}" "$exe" "$SSH_USER@$SSH_HOST:/tmp/offerGet-windows.exe"
+          ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
+            'sudo install -m 644 /tmp/offerGet-mac.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg &&
+             sudo install -m 644 /tmp/offerGet-windows.exe /opt/offerget/shared/downloads/offerGet-windows.exe &&
+             rm -f /tmp/offerGet-mac.dmg /tmp/offerGet-windows.exe'

@@ -1,189 +1,165 @@
 import { ipcMain } from 'electron'
 import WebSocket from 'ws'
-import { randomUUID } from 'node:crypto'
+import { offergetApi } from './offerget-api'
 
-const WS_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference/'
-
-let ws: WebSocket | null = null
-let taskId: string | null = null
-let isTranscribing = false
-let taskStarted = false
 let accumulatedText = ''
-let currentPartial = ''
+let finalText = ''
+let partialText = ''
+let socket: WebSocket | null = null
+let ready = false
+let stopping = false
 
-function sendToRenderer(channel: string, ...args: unknown[]) {
-  const mainWindow = global.mainWindow
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, ...args)
-  }
+function visibleText(): string {
+  return [finalText, partialText].filter(Boolean).join(finalText && partialText ? '\n' : '')
 }
 
-function cleanup() {
-  if (ws) {
-    ws.removeAllListeners()
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close()
-    }
-    ws = null
-  }
-  taskId = null
-  isTranscribing = false
-  taskStarted = false
-}
-
-function startTranscription(apiKey: string) {
-  if (isTranscribing) return
-
-  cleanup()
-  isTranscribing = true
-  taskId = randomUUID()
-
-  ws = new WebSocket(WS_URL, {
-    headers: { Authorization: `bearer ${apiKey}` }
-  })
-
-  ws.on('open', () => {
-    const runTask = {
-      header: {
-        action: 'run-task',
-        task_id: taskId,
-        streaming: 'duplex'
-      },
-      payload: {
-        task_group: 'audio',
-        task: 'asr',
-        function: 'recognition',
-        model: 'fun-asr-realtime',
-        parameters: {
-          format: 'pcm',
-          sample_rate: 16000
-        },
-        input: {}
-      }
-    }
-    ws!.send(JSON.stringify(runTask))
-  })
-
-  ws.on('message', (data: WebSocket.Data) => {
-    try {
-      const msg = JSON.parse(data.toString())
-      const event = msg.header?.event
-
-      if (event === 'task-started') {
-        taskStarted = true
-        return
-      }
-
-      if (event === 'result-generated') {
-        const sentence = msg.payload?.output?.sentence
-        if (!sentence) return
-
-        const text: string = sentence.text || ''
-        const sentenceEnd: boolean = sentence.sentence_end === true
-
-        if (sentenceEnd) {
-          if (text) {
-            accumulatedText += (accumulatedText ? '' : '') + text
-          }
-          currentPartial = ''
-        } else {
-          currentPartial = text
-        }
-
-        sendToRenderer('transcription-text', {
-          text: getTranscriptionText(),
-          isPartial: !sentenceEnd
-        })
-        return
-      }
-
-      if (event === 'task-failed') {
-        const errorMsg = msg.header?.error_message || '语音识别失败'
-        console.error('Transcription task failed:', errorMsg)
-        sendToRenderer('transcription-error', errorMsg)
-        cleanup()
-        sendToRenderer('transcription-stopped')
-        return
-      }
-
-      if (event === 'task-finished') {
-        cleanup()
-        sendToRenderer('transcription-stopped')
-      }
-    } catch (e) {
-      console.error('Failed to parse transcription message:', e)
-    }
-  })
-
-  ws.on('error', (err) => {
-    console.error('Transcription WebSocket error:', err)
-    sendToRenderer('transcription-error', err.message || 'WebSocket 连接失败')
-    cleanup()
-    sendToRenderer('transcription-stopped')
-  })
-
-  ws.on('close', () => {
-    if (isTranscribing) {
-      isTranscribing = false
-      sendToRenderer('transcription-stopped')
-    }
-    ws = null
-    taskStarted = false
+function emitText(isPartial: boolean): void {
+  accumulatedText = visibleText()
+  global.mainWindow?.webContents.send('transcription-text', {
+    text: accumulatedText,
+    isPartial
   })
 }
 
-function stopTranscription() {
-  if (!isTranscribing) return
-
-  if (ws && ws.readyState === WebSocket.OPEN && taskId && taskStarted) {
-    const finishTask = {
-      header: {
-        action: 'finish-task',
-        task_id: taskId,
-        streaming: 'duplex'
-      },
-      payload: {
-        input: {}
-      }
-    }
-    ws.send(JSON.stringify(finishTask))
-  }
-
-  isTranscribing = false
-  cleanup()
-  sendToRenderer('transcription-stopped')
+function emitStopped(): void {
+  global.mainWindow?.webContents.send('transcription-stopped')
 }
 
-function handleAudioChunk(chunk: ArrayBuffer) {
-  if (!ws || ws.readyState !== WebSocket.OPEN || !taskStarted) return
-  ws.send(Buffer.from(chunk))
+function cleanup(current: WebSocket | null): void {
+  if (current && socket !== current) return
+  socket = null
+  ready = false
+  stopping = false
 }
 
 export function getTranscriptionText(): string {
-  return accumulatedText + currentPartial
+  return accumulatedText
 }
 
 export function clearTranscriptionText() {
   accumulatedText = ''
-  currentPartial = ''
+  finalText = ''
+  partialText = ''
 }
 
-ipcMain.handle('start-transcription', (_event, apiKey: string) => {
-  startTranscription(apiKey)
+ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) => {
+  if (socket) throw new Error('语音识别已经在运行')
+  const { asrSession, streamTicket } = await offergetApi.startAsrTrial(practiceSessionId)
+  const current = new WebSocket(offergetApi.asrStreamUrl(streamTicket), {
+    perMessageDeflate: false
+  })
+  socket = current
+  stopping = false
+
+  return new Promise<{ expiresAt: string }>((resolve, reject) => {
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      current.terminate()
+      cleanup(current)
+      reject(new Error('语音服务启动超时，请稍后重试'))
+    }, 12_000)
+
+    current.on('message', (raw) => {
+      let message: {
+        type?: string
+        message?: string
+        text?: string
+        isPartial?: boolean
+      }
+      try {
+        message = JSON.parse(raw.toString())
+      } catch {
+        return
+      }
+
+      if (message.type === 'ready') {
+        ready = true
+        if (!settled) {
+          settled = true
+          clearTimeout(timeout)
+          resolve({ expiresAt: asrSession.expiresAt })
+        }
+        return
+      }
+      if (message.type === 'transcript' && typeof message.text === 'string') {
+        if (message.isPartial) {
+          partialText = message.text
+          emitText(true)
+        } else {
+          finalText = [finalText, message.text].filter(Boolean).join('\n')
+          partialText = ''
+          emitText(false)
+        }
+        return
+      }
+      if (message.type === 'error') {
+        const errorMessage = message.message || '语音识别失败'
+        if (!settled) {
+          settled = true
+          clearTimeout(timeout)
+          reject(new Error(errorMessage))
+        } else {
+          global.mainWindow?.webContents.send('transcription-error', errorMessage)
+        }
+        current.close()
+        return
+      }
+      if (message.type === 'stopped') {
+        stopping = true
+        current.close()
+      }
+    })
+
+    current.on('error', () => {
+      const message = '无法连接 offerGet 语音服务'
+      if (!settled) {
+        settled = true
+        clearTimeout(timeout)
+        reject(new Error(message))
+      } else {
+        global.mainWindow?.webContents.send('transcription-error', message)
+      }
+    })
+
+    current.on('close', () => {
+      clearTimeout(timeout)
+      const wasReady = ready
+      const wasStopping = stopping
+      cleanup(current)
+      if (!settled) {
+        settled = true
+        reject(new Error('语音服务连接已关闭'))
+      } else if (wasReady && wasStopping) {
+        emitStopped()
+      } else if (wasReady) {
+        global.mainWindow?.webContents.send('transcription-error', '语音服务连接中断')
+      }
+    })
+  })
 })
 
 ipcMain.handle('stop-transcription', () => {
-  stopTranscription()
+  const current = socket
+  if (!current) {
+    emitStopped()
+    return
+  }
+  stopping = true
+  if (current.readyState === WebSocket.OPEN) {
+    current.send(JSON.stringify({ type: 'stop' }))
+    setTimeout(() => {
+      if (socket === current) current.close()
+    }, 1_500)
+  } else {
+    current.close()
+  }
 })
 
 ipcMain.on('transcription-audio-chunk', (_event, chunk: ArrayBuffer) => {
-  handleAudioChunk(chunk)
+  if (ready && socket?.readyState === WebSocket.OPEN) socket.send(Buffer.from(chunk))
 })
 
-ipcMain.handle('get-transcription-text', () => {
-  return getTranscriptionText()
-})
-
-ipcMain.handle('clear-transcription-text', () => {
-  clearTranscriptionText()
-})
+ipcMain.handle('get-transcription-text', () => accumulatedText)
+ipcMain.handle('clear-transcription-text', () => clearTranscriptionText())

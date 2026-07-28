@@ -11,6 +11,20 @@ const api = {
   updateAppSettings: (settings: Partial<AppSettings>) =>
     ipcRenderer.invoke('updateAppSettings', settings),
 
+  // offerGet account, entitlements and checkout. Tokens never cross this bridge.
+  sendEmailCode: (email: string) => ipcRenderer.invoke('offerget:send-code', email),
+  verifyEmailCode: (email: string, code: string) =>
+    ipcRenderer.invoke('offerget:verify-code', email, code),
+  logout: () => ipcRenderer.invoke('offerget:logout'),
+  getEntitlements: () => ipcRenderer.invoke('offerget:entitlements'),
+  startPracticeSession: () => ipcRenderer.invoke('offerget:start-session'),
+  stopPracticeSession: (id: string) => ipcRenderer.invoke('offerget:stop-session', id),
+  startAsrTrial: (sessionId: string) => ipcRenderer.invoke('offerget:start-asr', sessionId),
+  createCheckout: (productCode: 'single_session' | 'ten_session') =>
+    ipcRenderer.invoke('offerget:checkout', productCode),
+  getOrder: (orderNo: string) => ipcRenderer.invoke('offerget:order', orderNo),
+  markOrderPaid: (orderNo: string) => ipcRenderer.invoke('offerget:mark-paid', orderNo),
+
   // Update app state
   updateAppState: (state: Partial<AppState>) => ipcRenderer.invoke('updateAppState', state),
   // Listen for app state
@@ -139,7 +153,8 @@ const api = {
   selectScreenshotDir: () => ipcRenderer.invoke('selectScreenshotDir') as Promise<string | null>,
 
   // Transcription
-  startTranscription: (apiKey: string) => ipcRenderer.invoke('start-transcription', apiKey),
+  startTranscription: (practiceSessionId: string) =>
+    ipcRenderer.invoke('start-transcription', practiceSessionId),
   stopTranscription: () => ipcRenderer.invoke('stop-transcription'),
   sendTranscriptionAudioChunk: (chunk: ArrayBuffer) =>
     ipcRenderer.send('transcription-audio-chunk', chunk),
