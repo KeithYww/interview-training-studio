@@ -65,20 +65,35 @@ class OfferGetError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}, authenticated = false): Promise<T> {
+async function fetchResponse(
+  path: string,
+  init: RequestInit = {},
+  authenticated = false
+): Promise<Response> {
   const headers = new Headers(init.headers)
-  headers.set('content-type', 'application/json')
+  if (!headers.has('content-type')) headers.set('content-type', 'application/json')
   if (authenticated) {
     await hydrateTokens()
     if (!tokens?.accessToken) throw new OfferGetError('请先登录后再使用完整练习功能', 'AUTH_REQUIRED')
     headers.set('authorization', `Bearer ${tokens.accessToken}`)
   }
-  let response: Response
   try {
-    response = await fetch(`${baseUrl}${path}`, { ...init, headers })
+    return await fetch(`${baseUrl}${path}`, { ...init, headers })
   } catch {
     throw new OfferGetError('无法连接 offerGet 服务，请确认后端已启动', 'SERVICE_UNAVAILABLE')
   }
+}
+
+async function responseError(response: Response): Promise<OfferGetError> {
+  const body = await response.json().catch(() => ({}))
+  return new OfferGetError(
+    body.error?.message || body.message || '服务暂时不可用，请稍后重试',
+    body.error?.code || body.code
+  )
+}
+
+async function request<T>(path: string, init: RequestInit = {}, authenticated = false): Promise<T> {
+  const response = await fetchResponse(path, init, authenticated)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new OfferGetError(body.error?.message || body.message || '服务暂时不可用，请稍后重试', body.error?.code || body.code)
@@ -98,6 +113,28 @@ async function authenticatedRequest<T>(path: string, init: RequestInit = {}): Pr
     return request<T>(path, init, true)
   }
 }
+
+async function authenticatedResponse(path: string, init: RequestInit = {}): Promise<Response> {
+  let response = await fetchResponse(path, init, true)
+  if (response.status === 401 && tokens?.refreshToken) {
+    const error = await responseError(response.clone())
+    if (error.code === 'AUTH_REQUIRED') {
+      const refreshed = await request<Tokens>('/v1/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: tokens.refreshToken })
+      })
+      await saveTokens(refreshed)
+      response = await fetchResponse(path, init, true)
+    }
+  }
+  if (!response.ok) throw await responseError(response)
+  return response
+}
+
+type ScreenshotStreamEvent =
+  | { type: 'delta'; text?: string }
+  | { type: 'done' }
+  | { type: 'error'; code?: string; message?: string }
 
 export const offergetApi = {
   async sendCode(email: string) {
@@ -138,7 +175,8 @@ export const offergetApi = {
       }
     ),
   asrStreamUrl: (ticket: string) => {
-    const url = new URL('/v1/asr-stream', `${baseUrl}/`)
+    const url = new URL(`${baseUrl}/`)
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/asr-stream`
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     url.searchParams.set('ticket', ticket)
     return url.toString()
@@ -150,20 +188,47 @@ export const offergetApi = {
   markPaid: (orderNo: string) => authenticatedRequest(`/v1/dev/orders/${orderNo}/mark-paid`, {
     method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}'
   }),
-  async screenshot(
+  async *screenshotStream(
     sessionId: string,
     images: string[],
     prompt: string,
     systemPrompt?: string,
     requestId = randomUUID(),
     signal?: AbortSignal
-  ): Promise<string> {
-    const result = await authenticatedRequest<{ answer?: string; text?: string }>('/v1/ai/screenshot', {
+  ): AsyncIterable<string> {
+    const response = await authenticatedResponse('/v1/ai/screenshot', {
       method: 'POST',
+      headers: { accept: 'application/x-ndjson' },
       body: JSON.stringify({ sessionId, requestId, images, prompt, systemPrompt }),
       signal
     })
-    return result.answer || result.text || '暂未收到练习建议。'
+    if (!response.body) throw new OfferGetError('服务未返回生成数据', 'EMPTY_RESPONSE')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let receivedText = false
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        let event: ScreenshotStreamEvent
+        try {
+          event = JSON.parse(line) as ScreenshotStreamEvent
+        } catch {
+          continue
+        }
+        if (event.type === 'error') {
+          throw new OfferGetError(event.message || '截图识别暂时失败', event.code)
+        }
+        if (event.type === 'delta' && event.text) {
+          receivedText = true
+          yield event.text
+        }
+      }
+    }
+    if (!receivedText) throw new OfferGetError('模型没有返回有效答案', 'EMPTY_RESPONSE')
   }
 }
 

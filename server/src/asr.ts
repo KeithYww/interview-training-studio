@@ -51,6 +51,9 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
         })
         let started = false
         let settled = false
+        let closing = false
+        let terminalNotified = false
+        let finishSent = false
         const timeout = setTimeout(() => {
           if (!settled) {
             settled = true
@@ -64,7 +67,8 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
             if (started && socket.readyState === WebSocket.OPEN) socket.send(chunk)
           },
           finish() {
-            if (socket.readyState !== WebSocket.OPEN) return
+            if (finishSent || socket.readyState !== WebSocket.OPEN) return
+            finishSent = true
             socket.send(
               JSON.stringify({
                 header: { action: 'finish-task', task_id: taskId, streaming: 'duplex' },
@@ -73,6 +77,7 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
             )
           },
           close() {
+            closing = true
             if (
               socket.readyState === WebSocket.OPEN ||
               socket.readyState === WebSocket.CONNECTING
@@ -126,7 +131,10 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
             return
           }
           if (eventName === 'task-finished') {
-            callbacks.onFinished()
+            if (!terminalNotified) {
+              terminalNotified = true
+              callbacks.onFinished()
+            }
             socket.close()
             return
           }
@@ -137,8 +145,10 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
               clearTimeout(timeout)
               reject(new Error(message))
             } else {
+              terminalNotified = true
               callbacks.onError(message)
             }
+            socket.close()
           }
         })
 
@@ -147,7 +157,8 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
             settled = true
             clearTimeout(timeout)
             reject(error)
-          } else {
+          } else if (!terminalNotified && !closing) {
+            terminalNotified = true
             callbacks.onError('语音服务连接异常')
           }
         })
@@ -157,8 +168,9 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
           if (!settled) {
             settled = true
             reject(new Error('语音服务连接已关闭'))
-          } else if (started) {
-            callbacks.onFinished()
+          } else if (started && !terminalNotified && !closing) {
+            terminalNotified = true
+            callbacks.onError('语音服务连接中断')
           }
         })
       })

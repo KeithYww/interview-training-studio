@@ -25,7 +25,7 @@ async function* serverSolution(messages: ModelMessage[], abortSignal?: AbortSign
   if (abortSignal?.aborted) return
   const session = await offergetApi.activeSession()
   const { images, prompt } = inputFrom(messages)
-  const answer = await offergetApi.screenshot(
+  const answerStream = offergetApi.screenshotStream(
     session.id,
     images,
     prompt,
@@ -33,7 +33,10 @@ async function* serverSolution(messages: ModelMessage[], abortSignal?: AbortSign
     undefined,
     abortSignal
   )
-  if (!abortSignal?.aborted) yield answer
+  for await (const chunk of answerStream) {
+    if (abortSignal?.aborted) return
+    yield chunk
+  }
 }
 
 export function getSolutionStream(messages: ModelMessage[], abortSignal?: AbortSignal) {

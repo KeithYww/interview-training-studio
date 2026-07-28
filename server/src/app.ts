@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { Readable } from 'node:stream'
 import Fastify, { FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -108,7 +109,9 @@ export function buildApp(
   const emailSender = options.emailSender
   const asrProvider = options.asrProvider
   const visionProvider = options.visionProvider
-  const app = Fastify({ logger: false })
+  const app = Fastify({
+    logger: process.env.NODE_ENV === 'production' ? { level: 'info' } : false
+  })
   void app.register(cors, { origin: process.env.CORS_ORIGIN ?? true })
 
   const hash = (value: string) => createHmac('sha256', secret).update(value).digest('hex')
@@ -592,6 +595,69 @@ export function buildApp(
 
     const dedupeKey = `${user.id}:${requestId}`
     const cached = repo.screenshotRequests.get(dedupeKey)
+    const wantsStream =
+      request.headers.accept?.includes('application/x-ndjson') && Boolean(visionProvider.stream)
+    if (wantsStream) {
+      reply.header('content-type', 'application/x-ndjson; charset=utf-8')
+      reply.header('cache-control', 'no-cache, no-transform')
+      reply.header('x-accel-buffering', 'no')
+      const responseStream = async function* () {
+        const startedAt = Date.now()
+        if (cached) {
+          yield `${JSON.stringify({ type: 'delta', text: cached })}\n`
+          yield `${JSON.stringify({
+            type: 'done',
+            reused: true,
+            totalMs: Date.now() - startedAt
+          })}\n`
+          return
+        }
+        let answer = ''
+        let firstChunkAt: number | undefined
+        try {
+          for await (const chunk of visionProvider.stream!({
+            images: inputImages,
+            prompt: prompt || '请识别并解答截图中的面试题。',
+            systemPrompt
+          })) {
+            if (!chunk) continue
+            firstChunkAt ??= Date.now()
+            answer += chunk
+            yield `${JSON.stringify({ type: 'delta', text: chunk })}\n`
+          }
+          if (!answer) throw new Error('视觉模型没有返回有效内容')
+          repo.screenshotRequests.set(dedupeKey, answer)
+          request.log.info(
+            {
+              requestId,
+              imageCount: inputImages.length,
+              firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : undefined,
+              totalMs: Date.now() - startedAt
+            },
+            'Screenshot recognition stream completed'
+          )
+          yield `${JSON.stringify({
+            type: 'done',
+            firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : undefined,
+            totalMs: Date.now() - startedAt
+          })}\n`
+        } catch (providerError) {
+          request.log.error({ err: providerError }, 'Screenshot recognition stream failed')
+          const providerMessage =
+            providerError instanceof Error ? providerError.message : '截图识别暂时失败'
+          yield `${JSON.stringify({
+            type: 'error',
+            code: providerMessage.includes('超时')
+              ? 'VISION_PROVIDER_TIMEOUT'
+              : 'VISION_PROVIDER_ERROR',
+            message: providerMessage.includes('超时')
+              ? '模型响应超时，请重新截屏'
+              : '截图识别暂时失败，请稍后重试'
+          })}\n`
+        }
+      }
+      return reply.send(Readable.from(responseStream()))
+    }
     if (cached) return { answer: cached, reused: true }
     try {
       const answer = await visionProvider.analyze({
@@ -601,7 +667,13 @@ export function buildApp(
       })
       repo.screenshotRequests.set(dedupeKey, answer)
       return { answer }
-    } catch {
+    } catch (providerError) {
+      request.log.error({ err: providerError }, 'Screenshot recognition provider failed')
+      const providerMessage =
+        providerError instanceof Error ? providerError.message : '截图识别暂时失败'
+      if (providerMessage.includes('超时')) {
+        return error(reply, 504, 'VISION_PROVIDER_TIMEOUT', '模型响应超时，请重新截屏')
+      }
       return error(reply, 502, 'VISION_PROVIDER_ERROR', '截图识别暂时失败，请稍后重试')
     }
   })

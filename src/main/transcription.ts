@@ -8,6 +8,9 @@ let partialText = ''
 let socket: WebSocket | null = null
 let ready = false
 let stopping = false
+let pendingAudio: Buffer[] = []
+let pendingAudioBytes = 0
+const MAX_PENDING_AUDIO_BYTES = 128 * 1024
 
 function visibleText(): string {
   return [finalText, partialText].filter(Boolean).join(finalText && partialText ? '\n' : '')
@@ -30,6 +33,8 @@ function cleanup(current: WebSocket | null): void {
   socket = null
   ready = false
   stopping = false
+  pendingAudio = []
+  pendingAudioBytes = 0
 }
 
 export function getTranscriptionText(): string {
@@ -50,9 +55,12 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
   })
   socket = current
   stopping = false
+  pendingAudio = []
+  pendingAudioBytes = 0
 
   return new Promise<{ expiresAt: string }>((resolve, reject) => {
     let settled = false
+    let hadError = false
     const timeout = setTimeout(() => {
       if (settled) return
       settled = true
@@ -76,6 +84,9 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
 
       if (message.type === 'ready') {
         ready = true
+        for (const chunk of pendingAudio) current.send(chunk)
+        pendingAudio = []
+        pendingAudioBytes = 0
         if (!settled) {
           settled = true
           clearTimeout(timeout)
@@ -95,6 +106,7 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
         return
       }
       if (message.type === 'error') {
+        hadError = true
         const errorMessage = message.message || '语音识别失败'
         if (!settled) {
           settled = true
@@ -113,6 +125,7 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
     })
 
     current.on('error', () => {
+      hadError = true
       const message = '无法连接 offerGet 语音服务'
       if (!settled) {
         settled = true
@@ -133,7 +146,7 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
         reject(new Error('语音服务连接已关闭'))
       } else if (wasReady && wasStopping) {
         emitStopped()
-      } else if (wasReady) {
+      } else if (wasReady && !hadError) {
         global.mainWindow?.webContents.send('transcription-error', '语音服务连接中断')
       }
     })
@@ -158,7 +171,18 @@ ipcMain.handle('stop-transcription', () => {
 })
 
 ipcMain.on('transcription-audio-chunk', (_event, chunk: ArrayBuffer) => {
-  if (ready && socket?.readyState === WebSocket.OPEN) socket.send(Buffer.from(chunk))
+  const audio = Buffer.from(new Uint8Array(chunk))
+  if (ready && socket?.readyState === WebSocket.OPEN) {
+    socket.send(audio)
+    return
+  }
+  if (!socket || socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED)
+    return
+  pendingAudio.push(audio)
+  pendingAudioBytes += audio.byteLength
+  while (pendingAudioBytes > MAX_PENDING_AUDIO_BYTES && pendingAudio.length > 1) {
+    pendingAudioBytes -= pendingAudio.shift()!.byteLength
+  }
 })
 
 ipcMain.handle('get-transcription-text', () => accumulatedText)

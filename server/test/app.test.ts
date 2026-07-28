@@ -221,6 +221,12 @@ test('截图网关向模型转发图片和题目上下文并按请求去重', as
       calls += 1
       lastVisionRequest = request
       return '截图答案'
+    },
+    async *stream(request) {
+      calls += 1
+      lastVisionRequest = request
+      yield '流式'
+      yield '截图答案'
     }
   }
   const app = buildApp({ secret: 'test', devCodes: true, visionProvider })
@@ -261,6 +267,23 @@ test('截图网关向模型转发图片和题目上下文并按请求去重', as
     prompt: payload.prompt,
     systemPrompt: payload.systemPrompt
   })
+  const streamed = await app.inject({
+    method: 'POST',
+    url: '/v1/ai/screenshot',
+    headers: { ...auth(accessToken), accept: 'application/x-ndjson' },
+    payload: { ...payload, requestId: 'vision-request-stream' }
+  })
+  assert.equal(streamed.statusCode, 200)
+  const streamEvents = streamed.body
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { type: string; text?: string })
+  assert.deepEqual(
+    streamEvents.filter((event) => event.type === 'delta').map((event) => event.text),
+    ['流式', '截图答案']
+  )
+  assert.equal(streamEvents.at(-1)?.type, 'done')
+  assert.equal(calls, 2)
   await app.close()
 })
 

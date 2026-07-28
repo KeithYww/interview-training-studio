@@ -18,6 +18,17 @@ test('OpenAI 兼容视觉适配器使用服务端密钥并发送 Base64 Data URL
     request.on('data', (chunk) => chunks.push(chunk))
     request.on('end', () => {
       receivedBody = JSON.parse(Buffer.concat(chunks).toString())
+      if (receivedBody?.stream === true) {
+        response.setHeader('content-type', 'text/event-stream')
+        response.write(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: '流式' } }] })}\n\n`
+        )
+        response.write(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: '返回成功' } }] })}\n\n`
+        )
+        response.end('data: [DONE]\n\n')
+        return
+      }
       response.setHeader('content-type', 'application/json')
       response.end(
         JSON.stringify({
@@ -58,6 +69,17 @@ test('OpenAI 兼容视觉适配器使用服务端密钥并发送 Base64 Data URL
         ?.detail,
       'high'
     )
+    assert.ok(provider.stream)
+    const streamed: string[] = []
+    for await (const chunk of provider.stream({
+      images: ['raw-base64'],
+      prompt: '识别题目',
+      systemPrompt: '中文回答'
+    })) {
+      streamed.push(chunk)
+    }
+    assert.deepEqual(streamed, ['流式', '返回成功'])
+    assert.equal(receivedBody?.stream, true)
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve()))
