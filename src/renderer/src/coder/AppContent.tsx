@@ -4,6 +4,7 @@ import { useSolutionStore } from '@/lib/store/solution'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import ShortcutRenderer from '@/components/ShortcutRenderer'
 import { Button } from '@/components/ui/button'
+import { SceneQuickSwitch } from '@/components/SceneManager'
 import { InterviewStartPanel } from './InterviewStartPanel'
 
 const SCROLL_OFFSET = 120
@@ -149,6 +150,7 @@ export function AppContent() {
   return (
     <div id="app-content" className="px-6 py-4">
       <InterviewStartPanel />
+      <SceneQuickSwitch />
 
       {/* Error Banner */}
       {interviewAccess === 'active' && errorMessage && (
