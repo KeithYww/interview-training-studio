@@ -18,12 +18,19 @@ jobs:
         include:
           - os: windows-latest
             command: build:win
+            build_args: --publish never
             artifact: windows
             artifact_glob: dist/*setup.exe
           - os: macos-15-intel
             command: build:mac
+            build_args: --x64 --publish never
             artifact: macos-intel
-            artifact_glob: dist/*.dmg
+            artifact_glob: dist/*-x64.dmg
+          - os: macos-15
+            command: build:mac
+            build_args: --arm64 --publish never
+            artifact: macos-apple-silicon
+            artifact_glob: dist/*-arm64.dmg
 
     steps:
       - name: Checkout repository
@@ -38,7 +45,7 @@ jobs:
         run: npm ci
 
       - name: Package Electron app
-        run: npm run ${{ matrix.command }} -- --publish never
+        run: npm run ${{ matrix.command }} -- ${{ matrix.build_args }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -84,14 +91,19 @@ jobs:
           SSH_USER: ${{ secrets.CHINA_SSH_USER }}
         run: |
           set -euo pipefail
-          dmg="$(find dist -type f -name '*.dmg' | head -1)"
+          dmg_x64="$(find dist -type f -name '*-x64.dmg' | head -1)"
+          dmg_arm64="$(find dist -type f -name '*-arm64.dmg' | head -1)"
           exe="$(find dist -type f -name '*setup.exe' | head -1)"
-          test -f "$dmg"
+          test -f "$dmg_x64"
+          test -f "$dmg_arm64"
           test -f "$exe"
           ssh_opts=(-i ~/.ssh/offerget_deploy -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          scp "${ssh_opts[@]}" "$dmg" "$SSH_USER@$SSH_HOST:/tmp/offerGet-mac.dmg"
+          scp "${ssh_opts[@]}" "$dmg_x64" "$SSH_USER@$SSH_HOST:/tmp/offerGet-mac-x64.dmg"
+          scp "${ssh_opts[@]}" "$dmg_arm64" "$SSH_USER@$SSH_HOST:/tmp/offerGet-mac-arm64.dmg"
           scp "${ssh_opts[@]}" "$exe" "$SSH_USER@$SSH_HOST:/tmp/offerGet-windows.exe"
           ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
-            'sudo install -m 644 /tmp/offerGet-mac.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg &&
+            'sudo install -m 644 /tmp/offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac-x64.dmg &&
+             sudo install -m 644 /tmp/offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg &&
+             sudo install -m 644 /tmp/offerGet-mac-arm64.dmg /opt/offerget/shared/downloads/offerGet-mac-arm64.dmg &&
              sudo install -m 644 /tmp/offerGet-windows.exe /opt/offerget/shared/downloads/offerGet-windows.exe &&
-             rm -f /tmp/offerGet-mac.dmg /tmp/offerGet-windows.exe'
+             rm -f /tmp/offerGet-mac-x64.dmg /tmp/offerGet-mac-arm64.dmg /tmp/offerGet-windows.exe'
