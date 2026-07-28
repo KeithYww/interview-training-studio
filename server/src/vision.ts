@@ -1,5 +1,7 @@
 const DEFAULT_SYSTEM_PROMPT =
   '你是 offerGet 的面试辅助教练。请准确识别截图中的题目，结合用户提供的上下文，用中文给出清晰、可执行的分析与答案。'
+const DEFAULT_VOICE_SYSTEM_PROMPT =
+  '你是 offerGet 的实时面试辅助教练。用户输入是面试官语音转写的问题。请直接用中文给出适合面试现场参考的准确答案，先给结论，再给简洁的回答思路；不要提及语音转写。'
 
 export type VisionRequest = {
   images: string[]
@@ -59,7 +61,9 @@ function requestBody(
     messages: [
       {
         role: 'system',
-        content: systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT
+        content:
+          systemPrompt?.trim() ||
+          (images.length > 0 ? DEFAULT_SYSTEM_PROMPT : DEFAULT_VOICE_SYSTEM_PROMPT)
       },
       {
         role: 'user',

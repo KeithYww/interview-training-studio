@@ -15,7 +15,9 @@ const mockAsrProvider: AsrProvider = {
       finish() {
         callbacks.onFinished()
       },
-      close() {}
+      close() {
+        return undefined
+      }
     }
   }
 }
@@ -461,6 +463,57 @@ test('语音供应商未配置时禁用能力且不扣免费次数', async () =>
   ).json()
   assert.equal(entitlements.features.voiceRecognition, false)
   assert.equal(entitlements.trial.voice.remaining, 3)
+  await app.close()
+})
+
+test('语音转写问题无需截图即可流式调用模型作答', async () => {
+  let request: VisionRequest | undefined
+  const visionProvider: VisionProvider = {
+    async analyze(input) {
+      request = input
+      return '文本回答'
+    },
+    async *stream(input) {
+      request = input
+      yield '面试'
+      yield '回答'
+    }
+  }
+  const app = buildApp({ secret: 'test', devCodes: true, visionProvider })
+  await app.ready()
+  const { accessToken } = await login(app, 'voice-answer@qq.com')
+  const practice = (
+    await app.inject({
+      method: 'POST',
+      url: '/v1/practice-sessions/start',
+      headers: auth(accessToken)
+    })
+  ).json().session
+  const response = await app.inject({
+    method: 'POST',
+    url: '/v1/ai/answer',
+    headers: { ...auth(accessToken), accept: 'application/x-ndjson' },
+    payload: {
+      sessionId: practice.id,
+      requestId: 'voice-answer-1',
+      prompt: '面试官刚刚问：请介绍一下事件循环',
+      systemPrompt: '请简洁回答'
+    }
+  })
+  assert.equal(response.statusCode, 200)
+  const events = response.body
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { type: string; text?: string })
+  assert.deepEqual(
+    events.filter((event) => event.type === 'delta').map((event) => event.text),
+    ['面试', '回答']
+  )
+  assert.deepEqual(request, {
+    images: [],
+    prompt: '面试官刚刚问：请介绍一下事件循环',
+    systemPrompt: '请简洁回答'
+  })
   await app.close()
 })
 

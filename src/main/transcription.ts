@@ -11,6 +11,39 @@ let stopping = false
 let pendingAudio: Buffer[] = []
 let pendingAudioBytes = 0
 const MAX_PENDING_AUDIO_BYTES = 128 * 1024
+const QUESTION_SETTLE_MS = 1_400
+let pendingQuestion = ''
+let questionTimer: ReturnType<typeof setTimeout> | null = null
+let finalTranscriptHandler: ((question: string) => void | Promise<void>) | null = null
+
+export function setFinalTranscriptHandler(
+  handler: ((question: string) => void | Promise<void>) | null
+): void {
+  finalTranscriptHandler = handler
+}
+
+function cancelPendingQuestion(): void {
+  if (questionTimer) clearTimeout(questionTimer)
+  questionTimer = null
+  pendingQuestion = ''
+}
+
+function queueFinalQuestion(text: string): void {
+  const normalized = text.trim()
+  if (!normalized) return
+  pendingQuestion = [pendingQuestion, normalized].filter(Boolean).join('，')
+  if (questionTimer) clearTimeout(questionTimer)
+  questionTimer = setTimeout(() => {
+    const question = pendingQuestion
+    questionTimer = null
+    pendingQuestion = ''
+    if (!question || !finalTranscriptHandler) return
+    void Promise.resolve(finalTranscriptHandler(question)).catch((error) => {
+      const message = error instanceof Error ? error.message : '语音问题作答失败'
+      global.mainWindow?.webContents.send('solution-error', message)
+    })
+  }, QUESTION_SETTLE_MS)
+}
 
 function visibleText(): string {
   return [finalText, partialText].filter(Boolean).join(finalText && partialText ? '\n' : '')
@@ -45,6 +78,7 @@ export function clearTranscriptionText() {
   accumulatedText = ''
   finalText = ''
   partialText = ''
+  cancelPendingQuestion()
 }
 
 ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) => {
@@ -102,6 +136,7 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
           finalText = [finalText, message.text].filter(Boolean).join('\n')
           partialText = ''
           emitText(false)
+          queueFinalQuestion(message.text)
         }
         return
       }

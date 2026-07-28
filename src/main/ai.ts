@@ -50,3 +50,50 @@ export function getFollowUpStream(messages: ModelMessage[], _userQuestion: strin
 export function getGeneralStream(messages: ModelMessage[], abortSignal?: AbortSignal) {
   return serverSolution(messages, abortSignal)
 }
+
+function textConversationContext(messages: ModelMessage[]): string {
+  return messages
+    .slice(-8)
+    .map((message) => {
+      const text =
+        typeof message.content === 'string'
+          ? message.content
+          : message.content
+              .filter((part) => part.type === 'text' && 'text' in part)
+              .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
+              .join('\n')
+      if (!text.trim()) return ''
+      return `${message.role === 'assistant' ? '助手' : '面试官'}：${text.trim()}`
+    })
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(-12_000)
+}
+
+export async function* getVoiceAnswerStream(
+  messages: ModelMessage[],
+  question: string,
+  abortSignal?: AbortSignal
+) {
+  if (abortSignal?.aborted) return
+  const session = await offergetApi.activeSession()
+  const context = textConversationContext(messages)
+  const prompt = [
+    context ? `本场面试最近的对话上下文：\n${context}` : '',
+    `面试官刚刚提出的问题：\n${question.trim()}`,
+    '请直接给出候选人此刻可以参考的回答。'
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const answerStream = offergetApi.answerStream(
+    session.id,
+    prompt,
+    settings.customPrompt,
+    undefined,
+    abortSignal
+  )
+  for await (const chunk of answerStream) {
+    if (abortSignal?.aborted) return
+    yield chunk
+  }
+}

@@ -50,7 +50,7 @@ export default function HelpPage() {
               </li>
               <li className="flex gap-2">
                 <Info className="h-6 w-4" />
-                <span>面试中可开启实时语音识别，免费用户共 3 次，每次最多 15 分钟。</span>
+                <span>面试中可捕获面试官电脑声音，识别问题并自动生成参考回答。</span>
               </li>
             </ul>
           </div>

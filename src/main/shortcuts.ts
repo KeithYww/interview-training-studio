@@ -3,12 +3,18 @@ import type { BrowserWindow } from 'electron'
 import type { ModelMessage } from './model-message'
 import { takeScreenshot } from './take-screenshot'
 import { saveScreenshotToDisk } from './save-screenshot'
-import { getSolutionStream, getFollowUpStream, getGeneralStream } from './ai'
+import {
+  getSolutionStream,
+  getFollowUpStream,
+  getGeneralStream,
+  getVoiceAnswerStream
+} from './ai'
 import { state } from './state'
 import {
   getTranscriptionText,
   clearTranscriptionText,
-  stopTranscription
+  stopTranscription,
+  setFinalTranscriptHandler
 } from './transcription'
 import { offergetApi } from './offerget-api'
 
@@ -113,6 +119,81 @@ async function captureScreenshot(mainWindow: BrowserWindow): Promise<string | nu
     return null
   }
 }
+
+async function answerTranscribedQuestion(question: string): Promise<void> {
+  const mainWindow = global.mainWindow
+  const normalizedQuestion = question.trim()
+  if (
+    !normalizedQuestion ||
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    !state.inCoderPage ||
+    !state.interviewActive
+  )
+    return
+  if (!(await requireActivePracticeSession(mainWindow))) return
+
+  abortCurrentStream('new-request')
+  const streamContext: StreamContext = {
+    controller: new AbortController(),
+    reason: null
+  }
+  currentStreamContext = streamContext
+
+  if (conversationMessages.length === 0) {
+    mainWindow.webContents.send('solution-clear')
+  } else {
+    mainWindow.webContents.send('solution-chunk', '\n\n---\n\n')
+  }
+  mainWindow.webContents.send(
+    'solution-chunk',
+    `### 面试官问题\n\n${normalizedQuestion}\n\n### 参考回答\n\n`
+  )
+  mainWindow.webContents.send('ai-loading-start')
+
+  let assistantResponse = ''
+  let endedNaturally = true
+  try {
+    const answerStream = getVoiceAnswerStream(
+      conversationMessages,
+      normalizedQuestion,
+      streamContext.controller.signal
+    )
+    for await (const chunk of answerStream) {
+      if (streamContext.controller.signal.aborted) {
+        endedNaturally = false
+        break
+      }
+      assistantResponse += chunk
+      mainWindow.webContents.send('solution-chunk', chunk)
+    }
+
+    if (streamContext.controller.signal.aborted) {
+      if (streamContext.reason === 'user') {
+        mainWindow.webContents.send('solution-stopped')
+      }
+    } else if (endedNaturally && assistantResponse) {
+      conversationMessages.push({
+        role: 'user',
+        content: [{ type: 'text', text: normalizedQuestion }]
+      })
+      conversationMessages.push({ role: 'assistant', content: assistantResponse })
+      mainWindow.webContents.send('solution-complete')
+    }
+  } catch (error) {
+    if (!streamContext.controller.signal.aborted) {
+      console.error('Error answering transcribed question:', error)
+      mainWindow.webContents.send('solution-error', extractErrorMessage(error))
+    }
+  } finally {
+    if (currentStreamContext === streamContext) {
+      currentStreamContext = null
+      mainWindow.webContents.send('ai-loading-end')
+    }
+  }
+}
+
+setFinalTranscriptHandler(answerTranscribedQuestion)
 
 const callbacks: Record<string, () => void | Promise<void>> = {
   hideOrShowMainWindow: async () => {

@@ -73,13 +73,17 @@ export class MemoryRepository {
   paidEvents = new Set<string>()
   screenshotRequests = new Map<string, string>()
 
-  async persist() {}
+  async persist() {
+    return undefined
+  }
 
   async health() {
     return { database: false, persistent: false }
   }
 
-  async close() {}
+  async close() {
+    return undefined
+  }
 }
 
 function error(
@@ -562,6 +566,110 @@ export function buildApp(
       await repo.persist()
     }
     return { order: repo.orders.get(order.orderNo) }
+  })
+  app.post('/v1/ai/answer', { bodyLimit: 256 * 1024 }, async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const { sessionId, requestId, prompt, systemPrompt } = (request.body ?? {}) as {
+      sessionId?: string
+      requestId?: string
+      prompt?: string
+      systemPrompt?: string
+    }
+    const session = sessionId && repo.sessions.get(sessionId)
+    if (!session || session.userId !== user.id || session.stoppedAt)
+      return error(reply, 403, 'NO_ACTIVE_SESSION', '需要活跃练习会话')
+    if (Date.parse(session.expiresAt) <= now())
+      return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
+    if (!visionProvider)
+      return error(reply, 503, 'MODEL_UNAVAILABLE', '服务器尚未配置问答模型')
+    if (
+      !requestId ||
+      typeof prompt !== 'string' ||
+      !prompt.trim() ||
+      prompt.length > 20_000 ||
+      (systemPrompt?.length ?? 0) > 20_000
+    )
+      return error(reply, 400, 'INVALID_PROMPT', '语音问题为空或上下文过长')
+
+    const dedupeKey = `${user.id}:voice:${requestId}`
+    const cached = repo.screenshotRequests.get(dedupeKey)
+    const wantsStream =
+      request.headers.accept?.includes('application/x-ndjson') && Boolean(visionProvider.stream)
+    if (wantsStream) {
+      reply.header('content-type', 'application/x-ndjson; charset=utf-8')
+      reply.header('cache-control', 'no-cache, no-transform')
+      reply.header('x-accel-buffering', 'no')
+      const responseStream = async function* () {
+        const startedAt = Date.now()
+        if (cached) {
+          yield `${JSON.stringify({ type: 'delta', text: cached })}\n`
+          yield `${JSON.stringify({ type: 'done', reused: true, totalMs: Date.now() - startedAt })}\n`
+          return
+        }
+        let answer = ''
+        let firstChunkAt: number | undefined
+        try {
+          for await (const chunk of visionProvider.stream!({
+            images: [],
+            prompt: prompt.trim(),
+            systemPrompt
+          })) {
+            if (!chunk) continue
+            firstChunkAt ??= Date.now()
+            answer += chunk
+            yield `${JSON.stringify({ type: 'delta', text: chunk })}\n`
+          }
+          if (!answer) throw new Error('模型没有返回有效内容')
+          repo.screenshotRequests.set(dedupeKey, answer)
+          request.log.info(
+            {
+              requestId,
+              firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : undefined,
+              totalMs: Date.now() - startedAt
+            },
+            'Voice question answer stream completed'
+          )
+          yield `${JSON.stringify({
+            type: 'done',
+            firstChunkMs: firstChunkAt ? firstChunkAt - startedAt : undefined,
+            totalMs: Date.now() - startedAt
+          })}\n`
+        } catch (providerError) {
+          request.log.error({ err: providerError }, 'Voice question answer stream failed')
+          const providerMessage =
+            providerError instanceof Error ? providerError.message : '模型回答暂时失败'
+          yield `${JSON.stringify({
+            type: 'error',
+            code: providerMessage.includes('超时')
+              ? 'MODEL_PROVIDER_TIMEOUT'
+              : 'MODEL_PROVIDER_ERROR',
+            message: providerMessage.includes('超时')
+              ? '模型响应超时，请重试'
+              : '模型回答暂时失败，请稍后重试'
+          })}\n`
+        }
+      }
+      return reply.send(Readable.from(responseStream()))
+    }
+    if (cached) return { answer: cached, reused: true }
+    try {
+      const answer = await visionProvider.analyze({
+        images: [],
+        prompt: prompt.trim(),
+        systemPrompt
+      })
+      repo.screenshotRequests.set(dedupeKey, answer)
+      return { answer }
+    } catch (providerError) {
+      request.log.error({ err: providerError }, 'Voice question answer provider failed')
+      const providerMessage =
+        providerError instanceof Error ? providerError.message : '模型回答暂时失败'
+      if (providerMessage.includes('超时')) {
+        return error(reply, 504, 'MODEL_PROVIDER_TIMEOUT', '模型响应超时，请重试')
+      }
+      return error(reply, 502, 'MODEL_PROVIDER_ERROR', '模型回答暂时失败，请稍后重试')
+    }
   })
   app.post('/v1/ai/screenshot', { bodyLimit: 30 * 1024 * 1024 }, async (request, reply) => {
     const user = requireUser(request, reply)

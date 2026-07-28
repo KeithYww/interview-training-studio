@@ -239,6 +239,47 @@ export const offergetApi = {
       }
     }
     if (!receivedText) throw new OfferGetError('模型没有返回有效答案', 'EMPTY_RESPONSE')
+  },
+  async *answerStream(
+    sessionId: string,
+    prompt: string,
+    systemPrompt?: string,
+    requestId = randomUUID(),
+    signal?: AbortSignal
+  ): AsyncIterable<string> {
+    const response = await authenticatedResponse('/v1/ai/answer', {
+      method: 'POST',
+      headers: { accept: 'application/x-ndjson' },
+      body: JSON.stringify({ sessionId, requestId, prompt, systemPrompt }),
+      signal
+    })
+    if (!response.body) throw new OfferGetError('服务未返回生成数据', 'EMPTY_RESPONSE')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let receivedText = false
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        let event: ScreenshotStreamEvent
+        try {
+          event = JSON.parse(line) as ScreenshotStreamEvent
+        } catch {
+          continue
+        }
+        if (event.type === 'error') {
+          throw new OfferGetError(event.message || '模型回答暂时失败', event.code)
+        }
+        if (event.type === 'delta' && event.text) {
+          receivedText = true
+          yield event.text
+        }
+      }
+    }
+    if (!receivedText) throw new OfferGetError('模型没有返回有效答案', 'EMPTY_RESPONSE')
   }
 }
 

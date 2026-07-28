@@ -1,5 +1,3 @@
-import { useSettingsStore } from '@/lib/store/settings'
-
 let mediaStream: MediaStream | null = null
 let audioContext: AudioContext | null = null
 let processor: ScriptProcessorNode | null = null
@@ -17,13 +15,6 @@ function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
   window.api.sendTranscriptionAudioChunk(int16.buffer)
 }
 
-async function openMicrophoneStream(deviceId?: string): Promise<MediaStream> {
-  return navigator.mediaDevices.getUserMedia({
-    audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-    video: false
-  })
-}
-
 async function openSystemAudioStream(): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     audio: true,
@@ -32,44 +23,16 @@ async function openSystemAudioStream(): Promise<MediaStream> {
   stream.getVideoTracks().forEach((t) => t.stop())
   if (stream.getAudioTracks().length === 0) {
     stream.getTracks().forEach((t) => t.stop())
-    throw new Error('当前系统无法捕获系统音频')
+    throw new Error('未获取到电脑声音，请在系统共享窗口中勾选“共享系统音频”后重试')
   }
   return stream
 }
 
 export async function startAudioCapture(): Promise<void> {
-  const { audioInputDeviceId, audioOutputDeviceId } = useSettingsStore.getState()
-
-  let stream: MediaStream
-  if (audioInputDeviceId) {
-    try {
-      stream = await openMicrophoneStream(audioInputDeviceId)
-    } catch (err) {
-      console.warn('Failed to open selected microphone, falling back to default microphone:', err)
-      stream = await openMicrophoneStream()
-    }
-  } else {
-    try {
-      stream = await openSystemAudioStream()
-    } catch (err) {
-      console.warn('Failed to capture system audio, falling back to microphone:', err)
-      stream = await openMicrophoneStream()
-    }
-  }
-
+  const stream = await openSystemAudioStream()
   mediaStream = stream
 
   audioContext = new AudioContext({ sampleRate: 16000 })
-
-  if (audioOutputDeviceId && 'setSinkId' in audioContext) {
-    try {
-      await (audioContext as AudioContext & { setSinkId: (id: string) => Promise<void> }).setSinkId(
-        audioOutputDeviceId
-      )
-    } catch (err) {
-      console.warn('Failed to set audio output device:', err)
-    }
-  }
 
   const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
 

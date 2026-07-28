@@ -173,10 +173,10 @@ export function InterviewStartPanel() {
             {!entitlements.features?.voiceRecognition
               ? '语音服务待配置'
               : isTranscribing
-              ? '停止语音识别'
+              ? '停止语音作答'
               : active.kind === 'paid'
-                ? '开始语音识别'
-                : `语音识别 · 剩余 ${entitlements.trial?.voice?.remaining ?? 0} 次`}
+                ? '开启语音自动作答'
+                : `语音自动作答 · 剩余 ${entitlements.trial?.voice?.remaining ?? 0} 次`}
           </Button>
           <Button
             type="button"
