@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="offerGet 是面向编程练习与模拟面试复盘的桌面应用。"
+      content="offerGet 提供截屏解题、实时语音转录、场景化提示词与屏幕分享隐身能力，适用于编程面试、英语机试和在线考试。"
     />
     <title>offerGet · 练习得更自信</title>
     <link rel="icon" href="assets/offerget-icon.png" type="image/png" />
@@ -21,7 +21,8 @@
         <span>offer<b>Get</b></span>
       </a>
       <nav aria-label="页面导航">
-        <a href="#features">能力</a>
+        <a href="#features">核心能力</a>
+        <a href="#scenarios">适用场景</a>
         <a href="#plans">会话卡</a>
         <a href="#download">下载</a>
       </nav>
@@ -34,7 +35,7 @@
           <div class="eyebrow"><span></span> 面向练习与复盘的桌面工作台</div>
           <h1 id="hero-title">把准备，练到<br /><em>更自信。</em></h1>
           <p>
-            offerGet 将截图分析、语音整理与练习会话放在一个轻量桌面工作台里，帮助你沉淀思路、复盘表达。
+            offerGet 将截屏解题、实时语音转录与场景化提示词放进一个轻量桌面工作台，流式生成答案，并保持连续对话上下文。
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="#download">下载 offerGet <span>↓</span></a>
@@ -70,35 +71,76 @@
       </section>
 
       <section class="proof" aria-label="产品优势">
-        <div><b>01</b><span>轻量桌面体验</span></div>
-        <div><b>02</b><span>服务端权益管理</span></div>
-        <div><b>03</b><span>练习会话有序沉淀</span></div>
+        <div><b>01</b><span>截图与语音实时理解</span></div>
+        <div><b>02</b><span>场景化 AI 解答</span></div>
+        <div><b>03</b><span>隐身且不抢占焦点</span></div>
       </section>
 
       <section id="features" class="section features">
         <div class="section-heading">
-          <p class="eyebrow"><span></span> 在一处完成练习闭环</p>
-          <h2>专注准备，不被工具打断。</h2>
-          <p>从看题、梳理到复盘，所有能力围绕一次清晰、可控的练习会话展开。</p>
+          <p class="eyebrow"><span></span> 核心能力</p>
+          <h2>看见题目，理解声音，连续作答。</h2>
+          <p>围绕真实屏幕内容工作，不打断当前操作，让信息获取、模型分析与连续追问自然衔接。</p>
         </div>
-        <div class="feature-grid">
-          <article class="feature-card feature-large">
+        <div class="feature-grid capability-grid">
+          <article class="feature-card capability-card capability-primary">
             <div class="feature-icon icon-orange">⌘</div>
-            <h3>截图分析</h3>
-            <p>快速整理练习素材，形成结构化的思考与表达框架。</p>
+            <p class="card-kicker">SCREEN &amp; AUDIO</p>
+            <h3>截屏解题</h3>
+            <p>通过快捷键抓取屏幕内容，可附带电脑声音的实时转录文字，发送给视觉大模型分析并流式展示解答。支持追加截图和追问，保持对话上下文连续。</p>
+            <div class="feature-tags"><span>流式解答</span><span>追加截图</span><span>连续追问</span></div>
             <div class="feature-visual visual-scan"><i></i><i></i><i></i><b></b></div>
           </article>
-          <article class="feature-card">
-            <div class="feature-icon icon-blue">≈</div>
-            <h3>语音整理</h3>
-            <p>在练习过程中记录要点，帮助后续回看与优化表达。</p>
-            <div class="sound-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <article class="feature-card capability-card">
+            <div class="feature-icon icon-blue">✦</div>
+            <p class="card-kicker">PROMPT SCENES</p>
+            <h3>场景化提示词</h3>
+            <p>预置「解算法题」「英语考试」「通用问答」三个场景，一键切换；也可以添加自定义场景，扩展到任意题型。</p>
+            <div class="scene-chips"><span>解算法题</span><span>英语考试</span><span>通用问答</span><span class="chip-add">＋ 自定义</span></div>
           </article>
-          <article class="feature-card">
-            <div class="feature-icon icon-gold">↗</div>
-            <h3>会话节奏</h3>
-            <p>清晰展示剩余时间与当前状态，让每次练习都有边界。</p>
-            <div class="timer-visual"><b>60</b><span>min practice session</span></div>
+          <article class="feature-card capability-card compact-card">
+            <div class="feature-icon icon-gold">◉</div>
+            <p class="card-kicker">SCREEN SHARE SAFE</p>
+            <h3>屏幕分享隐身</h3>
+            <p>即使被要求分享屏幕，对方也看不到本助手的窗口。</p>
+            <div class="privacy-visual"><span class="privacy-window"></span><span class="privacy-eye">—</span><small>仅自己可见</small></div>
+          </article>
+          <article class="feature-card capability-card compact-card">
+            <div class="feature-icon icon-green">↗</div>
+            <p class="card-kicker">FOCUS FRIENDLY</p>
+            <h3>不抢占焦点</h3>
+            <p>窗口置顶半透明展示，不会导致原页面失焦，可规避“跳出网页”检测。</p>
+            <div class="focus-visual"><span>当前页面</span><i></i><b>offerGet · 置顶</b></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="scenarios" class="section scenarios">
+        <div class="section-heading">
+          <p class="eyebrow"><span></span> 适用场景</p>
+          <h2>从代码题到听力题，一套工作流。</h2>
+          <p>选择合适的场景提示词，让模型按题型组织思路、答案与代码。</p>
+        </div>
+        <div class="scenario-grid">
+          <article class="scenario-card scenario-highlight">
+            <div class="scenario-number">01</div>
+            <div>
+              <h3>编程面试 / 笔试</h3>
+              <p>分析屏幕上的题目，实时给出解题思路和代码，支持 Python、JavaScript、Java、C++ 等主流编程语言。</p>
+              <div class="language-row"><span>Python</span><span>JavaScript</span><span>Java</span><span>C++</span></div>
+            </div>
+          </article>
+          <article class="scenario-card">
+            <div class="scenario-number">02</div>
+            <div><h3>英语机试</h3><p>切换到「英语考试」场景，还可结合语音转录处理听力题。</p></div>
+          </article>
+          <article class="scenario-card">
+            <div class="scenario-number">03</div>
+            <div><h3>在线考试</h3><p>单选、多选、解答等通用题型，切换到「通用问答」场景即可。</p></div>
+          </article>
+          <article class="scenario-card">
+            <div class="scenario-number">04</div>
+            <div><h3>其他场景</h3><p>添加自定义提示词场景，根据自己的任务和题型自由扩展。</p></div>
           </article>
         </div>
       </section>
