@@ -37,8 +37,7 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
   const apiKey = process.env.DASHSCOPE_API_KEY?.trim()
   if (!apiKey) return undefined
   const endpoint =
-    process.env.DASHSCOPE_ASR_WS_URL?.trim() ||
-    'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
+    process.env.DASHSCOPE_ASR_WS_URL?.trim() || 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
   const model = process.env.DASHSCOPE_ASR_MODEL?.trim() || 'fun-asr-realtime'
 
   return {
@@ -54,6 +53,7 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
         let closing = false
         let terminalNotified = false
         let finishSent = false
+        let pendingPartialText = ''
         const timeout = setTimeout(() => {
           if (!settled) {
             settled = true
@@ -78,10 +78,7 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
           },
           close() {
             closing = true
-            if (
-              socket.readyState === WebSocket.OPEN ||
-              socket.readyState === WebSocket.CONNECTING
-            )
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
               socket.close()
           }
         }
@@ -127,12 +124,18 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
           if (eventName === 'result-generated') {
             const sentence = event.payload?.output?.sentence
             if (sentence?.heartbeat || !sentence?.text) return
-            callbacks.onTranscript(sentence.text, !sentence.sentence_end)
+            const isPartial = !sentence.sentence_end
+            pendingPartialText = isPartial ? sentence.text : ''
+            callbacks.onTranscript(sentence.text, isPartial)
             return
           }
           if (eventName === 'task-finished') {
             if (!terminalNotified) {
               terminalNotified = true
+              if (pendingPartialText) {
+                callbacks.onTranscript(pendingPartialText, false)
+                pendingPartialText = ''
+              }
               callbacks.onFinished()
             }
             socket.close()
