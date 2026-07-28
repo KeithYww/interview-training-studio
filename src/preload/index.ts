@@ -46,6 +46,8 @@ const api = {
   // Update shortcuts
   updateShortcuts: (shortcuts: { action: string; key: string }[]) =>
     ipcRenderer.invoke('updateShortcuts', shortcuts),
+  triggerShortcutAction: (action: 'takeScreenshot' | 'appendScreenshot') =>
+    ipcRenderer.invoke('triggerShortcutAction', action),
 
   // Listen for screenshot events
   onScreenshotTaken: (callback: (screenshotData: string) => void) => {

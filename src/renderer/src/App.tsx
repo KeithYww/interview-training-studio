@@ -54,9 +54,11 @@ export default function App() {
   }, [initialized, settingsStore])
 
   useEffect(() => {
-    window.api.initShortcuts(shortcuts)
-    window.api.getShortcuts().then((shortcutsStatus) => {
+    window.api.initShortcuts(shortcuts).then((shortcutsStatus) => {
       console.log('Shortcuts registered:', shortcutsStatus)
+      window.dispatchEvent(
+        new CustomEvent('offerget:shortcuts-status', { detail: shortcutsStatus })
+      )
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

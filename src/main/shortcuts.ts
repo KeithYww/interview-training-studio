@@ -101,7 +101,16 @@ async function requireActivePracticeSession(mainWindow: BrowserWindow): Promise<
   }
 }
 
-const callbacks: Record<string, () => void> = {
+async function captureScreenshot(mainWindow: BrowserWindow): Promise<string | null> {
+  try {
+    return await takeScreenshot()
+  } catch (error) {
+    mainWindow.webContents.send('solution-error', extractErrorMessage(error))
+    return null
+  }
+}
+
+const callbacks: Record<string, () => void | Promise<void>> = {
   hideOrShowMainWindow: async () => {
     const mainWindow = global.mainWindow
     if (!mainWindow || mainWindow.isDestroyed()) return
@@ -120,7 +129,7 @@ const callbacks: Record<string, () => void> = {
 
     abortCurrentStream('new-request')
     let loadingStarted = false
-    const screenshotData = await takeScreenshot()
+    const screenshotData = await captureScreenshot(mainWindow)
     if (screenshotData && mainWindow && !mainWindow.isDestroyed()) {
       saveScreenshotToDisk(screenshotData)
       const transcriptionText = getTranscriptionText()
@@ -239,7 +248,7 @@ const callbacks: Record<string, () => void> = {
     abortCurrentStream('new-request')
     let loadingStarted = false
 
-    const screenshotData = await takeScreenshot()
+    const screenshotData = await captureScreenshot(mainWindow)
     if (screenshotData && mainWindow && !mainWindow.isDestroyed()) {
       saveScreenshotToDisk(screenshotData)
       const transcriptionText = getTranscriptionText()
@@ -471,16 +480,20 @@ function registerShortcut(action: string, key: string) {
     status: registeredKeys.length ? ShortcutStatus.Registered : ShortcutStatus.Failed,
     registeredKeys
   }
+  if (!registeredKeys.length) {
+    console.error(`Failed to register shortcut "${key}" for action "${action}"`)
+  }
 }
 
 ipcMain.handle('getShortcuts', () => shortcuts)
 
 ipcMain.handle(
   'initShortcuts',
-  (_event, shortcuts: Record<string, { action: string; key: string }>) => {
-    Object.entries(shortcuts).forEach(([action, { key }]) => {
+  (_event, requestedShortcuts: Record<string, { action: string; key: string }>) => {
+    Object.entries(requestedShortcuts).forEach(([action, { key }]) => {
       registerShortcut(action, key)
     })
+    return shortcuts
   }
 )
 
@@ -490,6 +503,15 @@ ipcMain.handle('updateShortcuts', (_event, _shortcuts: { action: string; key: st
       registerShortcut(shortcut.action, shortcut.key)
     }
   })
+  return shortcuts
+})
+
+ipcMain.handle('triggerShortcutAction', async (_event, action: string) => {
+  if (!['takeScreenshot', 'appendScreenshot'].includes(action) || !callbacks[action]) {
+    return { ok: false, message: '不支持的快捷操作' }
+  }
+  await callbacks[action]()
+  return { ok: true }
 })
 
 ipcMain.handle('stopSolutionStream', () => {

@@ -3,6 +3,7 @@ import { useShortcutsStore } from '@/lib/store/shortcuts'
 import { useSolutionStore } from '@/lib/store/solution'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import ShortcutRenderer from '@/components/ShortcutRenderer'
+import { Button } from '@/components/ui/button'
 import { InterviewStartPanel } from './InterviewStartPanel'
 
 const SCROLL_OFFSET = 120
@@ -219,6 +220,26 @@ export function AppContent() {
 
 function ShortcutTip({ access }: { access: InterviewAccess }) {
   const { shortcuts } = useShortcutsStore()
+  const [shortcutFailed, setShortcutFailed] = useState(false)
+
+  useEffect(() => {
+    const applyStatus = (
+      snapshot:
+        | Record<string, { status?: string }>
+        | null
+        | undefined
+    ) => {
+      setShortcutFailed(snapshot?.takeScreenshot?.status === 'failed')
+    }
+    const handleStatus = (event: Event) => {
+      applyStatus(
+        (event as CustomEvent<Record<string, { status?: string }>>).detail
+      )
+    }
+    void window.api.getShortcuts().then(applyStatus)
+    window.addEventListener('offerget:shortcuts-status', handleStatus)
+    return () => window.removeEventListener('offerget:shortcuts-status', handleStatus)
+  }, [])
 
   if (access !== 'active') {
     return (
@@ -233,13 +254,25 @@ function ShortcutTip({ access }: { access: InterviewAccess }) {
   }
 
   return (
-    <div className="flex min-h-56 items-center justify-center text-xl text-gray-400 select-none">
-      按下快捷键
-      <ShortcutRenderer
-        shortcut={shortcuts.takeScreenshot.key}
-        className="mx-1 font-bold text-black"
-      />
-      截图识题
+    <div className="flex min-h-56 flex-col items-center justify-center gap-3 text-gray-400 select-none">
+      <div className="text-xl">
+        {shortcutFailed ? '当前快捷键注册失败' : '按下快捷键'}
+        <ShortcutRenderer
+          shortcut={shortcuts.takeScreenshot.key}
+          className="mx-1 font-bold text-black"
+        />
+        {shortcutFailed ? '，可能已被其他应用占用' : '截图识题'}
+      </div>
+      <Button
+        type="button"
+        variant={shortcutFailed ? 'default' : 'outline'}
+        onClick={() => void window.api.triggerShortcutAction('takeScreenshot')}
+      >
+        立即截屏
+      </Button>
+      {shortcutFailed && (
+        <p className="text-sm text-orange-700">可在“设置 → 快捷键”中更换组合键</p>
+      )}
     </div>
   )
 }
