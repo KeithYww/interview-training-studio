@@ -1,14 +1,11 @@
 name: Deploy China Production
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
   workflow_dispatch:
     inputs:
       deploy_sha:
-        description: Full commit SHA to deploy; defaults to main
-        required: false
+        description: Full commit SHA that has passed user acceptance
+        required: true
         type: string
 
 permissions:
@@ -20,11 +17,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     env:
       CHINA_URL: https://43.142.15.246:8443
@@ -37,13 +29,9 @@ jobs:
         id: release
         env:
           REQUESTED_SHA: ${{ inputs.deploy_sha }}
-          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          sha="${REQUESTED_SHA:-${WORKFLOW_SHA:-}}"
-          if [ -z "$sha" ]; then
-            sha="$(git ls-remote https://github.com/${{ github.repository }}.git refs/heads/main | awk '{print $1}')"
-          fi
+          sha="$REQUESTED_SHA"
           test "${#sha}" = '40'
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
