@@ -13,15 +13,22 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            command: build:win
+            artifact: windows
+          - os: macos-15-intel
+            command: build:mac
+            artifact: macos-intel
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -29,29 +36,30 @@ jobs:
         run: npm ci
 
       - name: Package Electron app
-        run: npm run build:${{ matrix.os == 'windows-latest' && 'win' || (matrix.os == 'macos-latest' && 'mac' || 'linux') }}
+        run: npm run ${{ matrix.command }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: electron-build-${{ matrix.os }}
+          name: electron-build-${{ matrix.artifact }}
           path: dist/** # electron-builder output folder
+          if-no-files-found: error
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: ./dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           files: |
             dist/**/*.dmg
             dist/**/*setup.exe

@@ -1,6 +1,6 @@
 {
   "name": "offerget",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "offerGet - AI 驱动的编程练习与复盘助手",
   "main": "./out/main/index.js",
   "scripts": {
