@@ -28,6 +28,9 @@ body {
     'PingFang SC',
     'Microsoft YaHei',
     sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 a {
   color: inherit;
@@ -147,6 +150,7 @@ nav a:hover {
   line-height: 0.98;
   letter-spacing: -0.07em;
   font-weight: 780;
+  text-wrap: balance;
 }
 .hero h1 em {
   color: var(--orange);
@@ -158,6 +162,7 @@ nav a:hover {
   color: #606b7d;
   font-size: 17px;
   line-height: 1.8;
+  text-wrap: pretty;
 }
 .hero-actions {
   display: flex;
@@ -444,6 +449,7 @@ nav a:hover {
 .section {
   width: min(1160px, calc(100% - 40px));
   margin: 130px auto;
+  scroll-margin-top: 32px;
 }
 .section-heading {
   max-width: 585px;
@@ -454,12 +460,14 @@ nav a:hover {
   font-size: clamp(32px, 4vw, 50px);
   line-height: 1.08;
   letter-spacing: -0.055em;
+  text-wrap: balance;
 }
 .section-heading > p:last-child {
   margin: 20px 0 0;
   color: #6b7280;
   font-size: 16px;
   line-height: 1.8;
+  text-wrap: pretty;
 }
 .feature-grid {
   display: grid;
@@ -478,6 +486,15 @@ nav a:hover {
   border-radius: 20px;
   background: #fff;
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.035);
+  transition:
+    transform 0.24s ease,
+    border-color 0.24s ease,
+    box-shadow 0.24s ease;
+}
+.feature-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(15, 23, 42, 0.15);
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.065);
 }
 .feature-card h3 {
   margin: 7px 0 10px;
@@ -490,6 +507,7 @@ nav a:hover {
   color: #697386;
   font-size: 14px;
   line-height: 1.75;
+  text-wrap: pretty;
 }
 .capability-card {
   min-height: 390px;
@@ -738,6 +756,7 @@ nav a:hover {
   color: #aab4c3;
   font-size: 13px;
   line-height: 1.75;
+  text-wrap: pretty;
 }
 .language-row {
   display: flex;
@@ -766,10 +785,21 @@ nav a:hover {
 }
 .plan-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
   padding: 32px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   border-radius: 20px;
   background: #fff;
+  transition:
+    transform 0.24s ease,
+    border-color 0.24s ease,
+    box-shadow 0.24s ease;
+}
+.plan-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 107, 26, 0.3);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.07);
 }
 .plan-card h3 {
   margin: 7px 0 4px;
@@ -797,6 +827,19 @@ nav a:hover {
 .price sup {
   font-size: 20px;
   vertical-align: 20px;
+}
+.price-pass {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  letter-spacing: -0.05em;
+}
+.price-pass sup {
+  color: #596477;
+  font-size: 16px;
+  font-weight: 720;
+  letter-spacing: 0;
+  vertical-align: baseline;
 }
 .plan-card > p:not(.plan-label) {
   color: #697386;
@@ -826,6 +869,7 @@ nav a:hover {
 }
 .plan-card .button {
   width: 100%;
+  margin-top: auto;
 }
 .plan-featured {
   overflow: hidden;
@@ -856,6 +900,7 @@ nav a:hover {
   color: #fff;
   background: linear-gradient(135deg, #101a31, #08101f 72%);
   box-shadow: 0 22px 50px rgba(9, 16, 32, 0.2);
+  scroll-margin-top: 32px;
 }
 .download-panel .eyebrow {
   color: #9eabbf;
@@ -866,6 +911,7 @@ nav a:hover {
   font-size: clamp(31px, 4vw, 47px);
   line-height: 1.1;
   letter-spacing: -0.06em;
+  text-wrap: balance;
 }
 .download-panel > div > p:last-child {
   max-width: 505px;
@@ -873,6 +919,7 @@ nav a:hover {
   color: #aab4c3;
   font-size: 14px;
   line-height: 1.75;
+  text-wrap: pretty;
 }
 .download-actions {
   display: flex;
@@ -1036,6 +1083,7 @@ footer .brand img {
   }
   .hero-copy > p:not(.hero-note) {
     font-size: 15px;
+    line-height: 1.72;
   }
   .hero-actions .button {
     width: 100%;
@@ -1097,5 +1145,17 @@ footer .brand img {
   }
   .price {
     font-size: 51px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .button,
+  .feature-card,
+  .plan-card,
+  .download-button {
+    transition: none;
   }
 }
