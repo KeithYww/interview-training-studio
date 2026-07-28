@@ -84,6 +84,7 @@ if [ "$healthy" != 'true' ]; then
 fi
 
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+sudo install -m 644 "$RELEASE_DIR/deploy/offerget-cert-reload.cron" /etc/cron.d/offerget-cert-reload
 find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
 find "$BACKUP_DIR" -type f -name 'offerget-*.dump' -mtime +14 -delete
 rm -f "$ARCHIVE_PATH"

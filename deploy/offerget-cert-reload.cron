@@ -1,0 +1,2 @@
+29 3 * * * root /opt/offerget/current/deploy/reload-shared-certificate.sh >> /var/log/offerget-cert-reload.log 2>&1
+
