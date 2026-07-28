@@ -17,8 +17,13 @@ type Entitlements = {
     screenshot?: { used: boolean; durationMinutes: number }
     voice?: { remaining: number; durationMinutes: number }
   }
-  passes?: { available?: number }
-  activeSession?: { id: string; expiresAt: string; kind?: 'trial' | 'paid' } | null
+  passes?: { available?: number; paid?: number; activation?: number }
+  activeSession?: {
+    id: string
+    expiresAt: string
+    voiceExpiresAt?: string
+    kind?: 'trial' | 'paid' | 'activation'
+  } | null
   features?: { voiceRecognition?: boolean; screenshotRecognition?: boolean }
 }
 
@@ -49,9 +54,7 @@ export function InterviewStartPanel() {
       )
     } else {
       setEntitlements(null)
-      window.dispatchEvent(
-        new CustomEvent('offerget:entitlements-updated', { detail: null })
-      )
+      window.dispatchEvent(new CustomEvent('offerget:entitlements-updated', { detail: null }))
     }
   }, [])
 
@@ -75,6 +78,10 @@ export function InterviewStartPanel() {
   const remainingLabel = `${Math.floor(remaining / 60000)}:${String(
     Math.floor(remaining / 1000) % 60
   ).padStart(2, '0')}`
+  const activationVoiceExpired =
+    active?.kind === 'activation' &&
+    Boolean(active.voiceExpiresAt) &&
+    new Date(active.voiceExpiresAt!).getTime() <= now
 
   useEffect(() => {
     if (!active) return
@@ -141,7 +148,12 @@ export function InterviewStartPanel() {
       <section className="offerget-interview-panel is-active">
         <div>
           <div className="offerget-interview-eyebrow">
-            面试进行中 · {active.kind === 'trial' ? '免费体验' : '次卡'}
+            面试进行中 ·{' '}
+            {active.kind === 'trial'
+              ? '免费体验'
+              : active.kind === 'activation'
+                ? '体验码'
+                : '次卡'}
           </div>
           <h2 className="flex items-center gap-2">
             <Clock3 className="size-5 text-orange-500" />
@@ -163,7 +175,7 @@ export function InterviewStartPanel() {
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
             }
-            disabled={busy || !entitlements.features?.voiceRecognition}
+            disabled={busy || !entitlements.features?.voiceRecognition || activationVoiceExpired}
             onClick={(event) => {
               event.stopPropagation()
               window.dispatchEvent(new Event('offerget:toggle-transcription'))
@@ -172,11 +184,15 @@ export function InterviewStartPanel() {
             {isTranscribing ? <MicOff className="size-4" /> : <Mic className="size-4" />}
             {!entitlements.features?.voiceRecognition
               ? '语音服务待配置'
-              : isTranscribing
-              ? '停止语音作答'
-              : active.kind === 'paid'
-                ? '开启语音自动作答'
-                : `语音自动作答 · 剩余 ${entitlements.trial?.voice?.remaining ?? 0} 次`}
+              : activationVoiceExpired
+                ? '语音权益已结束'
+                : isTranscribing
+                  ? '停止语音作答'
+                  : active.kind === 'paid'
+                    ? '开启语音自动作答'
+                    : active.kind === 'activation'
+                      ? '开启语音自动作答 · 45 分钟'
+                      : `语音自动作答 · 剩余 ${entitlements.trial?.voice?.remaining ?? 0} 次`}
           </Button>
           <Button
             type="button"
@@ -198,7 +214,7 @@ export function InterviewStartPanel() {
             <DialogHeader>
               <DialogTitle>确认结束本场面试？</DialogTitle>
               <DialogDescription>
-                结束后将立即停止计时并锁定截图识别。已使用的免费体验或次卡不会退回。
+                结束后将立即停止计时并锁定截图识别。已使用的免费体验、体验码权益或次卡不会退回。
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -223,6 +239,8 @@ export function InterviewStartPanel() {
 
   const trialAvailable = !entitlements.trial?.screenshot?.used
   const passes = entitlements.passes?.available ?? 0
+  const activationPasses = entitlements.passes?.activation ?? 0
+  const nextIsActivation = !trialAvailable && activationPasses > 0
 
   if (!trialAvailable && passes === 0) {
     return (
@@ -249,14 +267,26 @@ export function InterviewStartPanel() {
       <section className="offerget-interview-panel">
         <div>
           <div className="offerget-interview-eyebrow">
-            {trialAvailable ? '免费体验可用' : `可用次数 ${passes} 次`}
+            {trialAvailable
+              ? '免费体验可用'
+              : nextIsActivation
+                ? `体验码权益 ${activationPasses} 次`
+                : `可用次数 ${passes} 次`}
           </div>
-          <h2>{trialAvailable ? '首次面试免费使用 45 分钟' : '开始一场 60 分钟模拟面试'}</h2>
+          <h2>
+            {trialAvailable
+              ? '首次面试免费使用 45 分钟'
+              : nextIsActivation
+                ? '体验码面试：截图 60 分钟'
+                : '开始一场 60 分钟模拟面试'}
+          </h2>
           <p className="flex items-center gap-1.5">
             <WalletCards className="size-4" />
             {trialAvailable
               ? '开始后立即计时，可使用截图识别，不会扣除次卡。'
-              : '本场将使用 1 次次卡，开始后不可暂停。'}
+              : nextIsActivation
+                ? '本场将使用 1 次体验码权益，语音识别可使用前 45 分钟。'
+                : '本场将使用 1 次次卡，开始后不可暂停。'}
           </p>
           {notice && <p className="mt-2 text-orange-700">{notice}</p>}
         </div>
@@ -276,7 +306,9 @@ export function InterviewStartPanel() {
           <DialogHeader>
             <DialogTitle>确认开始本场面试？</DialogTitle>
             <DialogDescription>
-              将使用 1 次次卡，立即开始 60 分钟计时。开始后不可暂停，提前结束不退回次数。
+              {nextIsActivation
+                ? '将使用 1 次体验码权益：截图识别 60 分钟，语音识别前 45 分钟。开始后不可暂停，提前结束不退回。'
+                : '将使用 1 次次卡，立即开始 60 分钟计时。开始后不可暂停，提前结束不退回次数。'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -289,7 +321,7 @@ export function InterviewStartPanel() {
               disabled={busy}
               onClick={() => void startInterview()}
             >
-              使用 1 次并开始
+              {nextIsActivation ? '使用体验码权益并开始' : '使用 1 次并开始'}
             </Button>
           </DialogFooter>
         </DialogContent>

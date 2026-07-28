@@ -3,9 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const defaultBaseUrl = app.isPackaged
-  ? 'https://43.142.15.246:8443/api'
-  : 'http://127.0.0.1:3001'
+const defaultBaseUrl = app.isPackaged ? 'https://43.142.15.246:8443/api' : 'http://127.0.0.1:3001'
 const baseUrl = (process.env.OFFERGET_API_URL || defaultBaseUrl).replace(/\/$/, '')
 
 type Tokens = { accessToken: string; refreshToken: string }
@@ -42,8 +40,7 @@ async function saveTokens(next: Tokens | null) {
 
 async function refreshAuthTokens(): Promise<void> {
   if (refreshPromise) return refreshPromise
-  if (!tokens?.refreshToken)
-    throw new OfferGetError('登录状态已失效，请重新登录', 'AUTH_REQUIRED')
+  if (!tokens?.refreshToken) throw new OfferGetError('登录状态已失效，请重新登录', 'AUTH_REQUIRED')
   const refreshToken = tokens.refreshToken
   refreshPromise = request<Tokens>('/v1/auth/refresh', {
     method: 'POST',
@@ -56,7 +53,12 @@ async function refreshAuthTokens(): Promise<void> {
   return refreshPromise
 }
 
-export type PracticeSession = { id: string; expiresAt: string; kind?: 'trial' | 'paid' }
+export type PracticeSession = {
+  id: string
+  expiresAt: string
+  voiceExpiresAt?: string
+  kind?: 'trial' | 'paid' | 'activation'
+}
 export type AsrSession = {
   id: string
   practiceSessionId: string
@@ -70,14 +72,17 @@ export type Entitlements = {
     screenshot?: { used: boolean; durationMinutes: number }
     voice?: { remaining: number; durationMinutes: number }
   }
-  passes?: { available: number }
+  passes?: { available: number; paid?: number; activation?: number }
   activeSession?: PracticeSession | null
   features?: { voiceRecognition: boolean; screenshotRecognition: boolean }
   serverTime?: string
 }
 
 class OfferGetError extends Error {
-  constructor(message: string, readonly code?: string) {
+  constructor(
+    message: string,
+    readonly code?: string
+  ) {
     super(message)
   }
 }
@@ -91,7 +96,8 @@ async function fetchResponse(
   if (!headers.has('content-type')) headers.set('content-type', 'application/json')
   if (authenticated) {
     await hydrateTokens()
-    if (!tokens?.accessToken) throw new OfferGetError('请先登录后再使用完整练习功能', 'AUTH_REQUIRED')
+    if (!tokens?.accessToken)
+      throw new OfferGetError('请先登录后再使用完整练习功能', 'AUTH_REQUIRED')
     headers.set('authorization', `Bearer ${tokens.accessToken}`)
   }
   try {
@@ -113,7 +119,10 @@ async function request<T>(path: string, init: RequestInit = {}, authenticated = 
   const response = await fetchResponse(path, init, authenticated)
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new OfferGetError(body.error?.message || body.message || '服务暂时不可用，请稍后重试', body.error?.code || body.code)
+    throw new OfferGetError(
+      body.error?.message || body.message || '服务暂时不可用，请稍后重试',
+      body.error?.code || body.code
+    )
   }
   return body as T
 }
@@ -122,7 +131,12 @@ async function authenticatedRequest<T>(path: string, init: RequestInit = {}): Pr
   try {
     return await request<T>(path, init, true)
   } catch (error) {
-    if (!(error instanceof OfferGetError) || error.code !== 'AUTH_REQUIRED' || !tokens?.refreshToken) throw error
+    if (
+      !(error instanceof OfferGetError) ||
+      error.code !== 'AUTH_REQUIRED' ||
+      !tokens?.refreshToken
+    )
+      throw error
     await refreshAuthTokens()
     return request<T>(path, init, true)
   }
@@ -149,12 +163,14 @@ type ScreenshotStreamEvent =
 export const offergetApi = {
   async sendCode(email: string) {
     return request<{ devCode?: string }>('/v1/auth/send-email-code', {
-      method: 'POST', body: JSON.stringify({ email })
+      method: 'POST',
+      body: JSON.stringify({ email })
     })
   },
   async verifyCode(email: string, code: string) {
     const result = await request<Tokens & { user: { id: string; email: string } }>(
-      '/v1/auth/verify-email-code', { method: 'POST', body: JSON.stringify({ email, code }) }
+      '/v1/auth/verify-email-code',
+      { method: 'POST', body: JSON.stringify({ email, code }) }
     )
     await saveTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken })
     return { user: result.user }
@@ -163,27 +179,31 @@ export const offergetApi = {
   entitlements: () => authenticatedRequest<Entitlements>('/v1/me/entitlements'),
   async activeSession() {
     const entitlements = await this.entitlements()
-    if (!entitlements.activeSession?.id) throw new OfferGetError('请先启动练习会话', 'NO_ACTIVE_SESSION')
+    if (!entitlements.activeSession?.id)
+      throw new OfferGetError('请先启动练习会话', 'NO_ACTIVE_SESSION')
     if (new Date(entitlements.activeSession.expiresAt).getTime() <= Date.now()) {
       throw new OfferGetError('本次练习已到期，请重新启动会话', 'SESSION_EXPIRED')
     }
     return entitlements.activeSession
   },
-  startSession: () => authenticatedRequest<{ session: PracticeSession }>('/v1/practice-sessions/start', {
-    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}'
-  }),
-  stopSession: (id: string) => authenticatedRequest(`/v1/practice-sessions/${id}/stop`, {
-    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}'
-  }),
+  startSession: () =>
+    authenticatedRequest<{ session: PracticeSession }>('/v1/practice-sessions/start', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': randomUUID() },
+      body: '{}'
+    }),
+  stopSession: (id: string) =>
+    authenticatedRequest(`/v1/practice-sessions/${id}/stop`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': randomUUID() },
+      body: '{}'
+    }),
   startAsrTrial: (sessionId: string) =>
-    authenticatedRequest<{ asrSession: AsrSession; streamTicket: string }>(
-      '/v1/asr-trials/start',
-      {
-        method: 'POST',
-        headers: { 'Idempotency-Key': randomUUID() },
-        body: JSON.stringify({ sessionId })
-      }
-    ),
+    authenticatedRequest<{ asrSession: AsrSession; streamTicket: string }>('/v1/asr-trials/start', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({ sessionId })
+    }),
   asrStreamUrl: (ticket: string) => {
     const url = new URL(`${baseUrl}/`)
     url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/asr-stream`
@@ -191,13 +211,31 @@ export const offergetApi = {
     url.searchParams.set('ticket', ticket)
     return url.toString()
   },
-  checkout: (productCode: 'single_session' | 'ten_session') => authenticatedRequest<{ order: { orderNo: string }; payment?: unknown }>('/v1/checkout-sessions', {
-    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ productCode })
-  }),
+  checkout: (productCode: 'single_session' | 'ten_session') =>
+    authenticatedRequest<{ order: { orderNo: string }; payment?: unknown }>(
+      '/v1/checkout-sessions',
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': randomUUID() },
+        body: JSON.stringify({ productCode })
+      }
+    ),
   order: (orderNo: string) => authenticatedRequest(`/v1/orders/${orderNo}`),
-  markPaid: (orderNo: string) => authenticatedRequest(`/v1/dev/orders/${orderNo}/mark-paid`, {
-    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}'
-  }),
+  redeemActivationCode: (code: string) =>
+    authenticatedRequest<{
+      redeemed: boolean
+      benefit: { interviews: number; screenshotMinutes: number; voiceMinutes: number }
+      entitlements: Entitlements
+    }>('/v1/activation-codes/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code })
+    }),
+  markPaid: (orderNo: string) =>
+    authenticatedRequest(`/v1/dev/orders/${orderNo}/mark-paid`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': randomUUID() },
+      body: '{}'
+    }),
   async *screenshotStream(
     sessionId: string,
     images: string[],
@@ -289,30 +327,76 @@ function serializeError(error: unknown) {
 }
 
 ipcMain.handle('offerget:send-code', async (_event, email: string) => {
-  try { return { ok: true, ...(await offergetApi.sendCode(email)) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, ...(await offergetApi.sendCode(email)) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:verify-code', async (_event, email: string, code: string) => {
-  try { return { ok: true, ...(await offergetApi.verifyCode(email, code)) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, ...(await offergetApi.verifyCode(email, code)) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:logout', () => offergetApi.logout())
 ipcMain.handle('offerget:entitlements', async () => {
-  try { return { ok: true, data: await offergetApi.entitlements() } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, data: await offergetApi.entitlements() }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:start-session', async () => {
-  try { return { ok: true, ...(await offergetApi.startSession()) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, ...(await offergetApi.startSession()) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:stop-session', async (_event, id: string) => {
-  try { return { ok: true, await: await offergetApi.stopSession(id) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, await: await offergetApi.stopSession(id) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:start-asr', async (_event, sessionId: string) => {
-  try { return { ok: true, data: await offergetApi.startAsrTrial(sessionId) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, data: await offergetApi.startAsrTrial(sessionId) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
-ipcMain.handle('offerget:checkout', async (_event, productCode: 'single_session' | 'ten_session') => {
-  try { return { ok: true, ...(await offergetApi.checkout(productCode)) } } catch (error) { return { ok: false, ...serializeError(error) } }
-})
+ipcMain.handle(
+  'offerget:checkout',
+  async (_event, productCode: 'single_session' | 'ten_session') => {
+    try {
+      return { ok: true, ...(await offergetApi.checkout(productCode)) }
+    } catch (error) {
+      return { ok: false, ...serializeError(error) }
+    }
+  }
+)
 ipcMain.handle('offerget:order', async (_event, orderNo: string) => {
-  try { return { ok: true, data: await offergetApi.order(orderNo) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, data: await offergetApi.order(orderNo) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
+})
+ipcMain.handle('offerget:redeem-activation-code', async (_event, code: string) => {
+  try {
+    return { ok: true, ...(await offergetApi.redeemActivationCode(code)) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })
 ipcMain.handle('offerget:mark-paid', async (_event, orderNo: string) => {
-  try { return { ok: true, data: await offergetApi.markPaid(orderNo) } } catch (error) { return { ok: false, ...serializeError(error) } }
+  try {
+    return { ok: true, data: await offergetApi.markPaid(orderNo) }
+  } catch (error) {
+    return { ok: false, ...serializeError(error) }
+  }
 })

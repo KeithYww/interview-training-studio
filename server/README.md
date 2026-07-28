@@ -1,6 +1,6 @@
 # offerGet P0 API
 
-本地开发服务：QQ 邮箱验证码、SMTP 邮件发送、权益、练习会话、模拟支付发卡、实时语音和截图视觉模型网关。数据只保存在进程内，重启即清空；真实支付和持久化数据库仍未接入。
+服务端包含 QQ 邮箱验证码、SMTP 邮件发送、权益、练习会话、体验码、模拟支付发卡、实时语音和截图视觉模型网关。本地未配置 `DATABASE_URL` 时使用内存数据；生产环境使用 PostgreSQL 持久化。
 
 ```bash
 cp server/.env.example server/.env
@@ -36,7 +36,7 @@ DASHSCOPE_ASR_MODEL=fun-asr-realtime
 DASHSCOPE_ASR_WS_URL=wss://dashscope.aliyuncs.com/api-ws/v1/inference
 ```
 
-免费用户每次最多 15 分钟，共 3 次；只有百炼返回 `task-started` 后才扣 1 次。付费面试在本场剩余时间内使用语音不会额外扣次。
+免费用户每次最多 15 分钟，共 3 次；只有百炼返回 `task-started` 后才扣 1 次。付费面试在本场剩余时间内使用语音不会额外扣次，体验码面试可使用前 45 分钟语音能力。
 
 ## 接通截图识别
 
@@ -52,5 +52,27 @@ SILICONFLOW_VISION_TIMEOUT_MS=45000
 
 客户端只上传当前面试的截图、语音转录文本和场景提示词，无法读取模型密钥。未配置密钥时接口返回
 `VISION_UNAVAILABLE`，不会再返回 Mock 假答案。
+
+## 体验码生成器
+
+体验码只能由服务端生成，数据库仅保存不可逆哈希。每个码只能成功兑换一次，兑换后到账
+1 次面试权益：截图识别 60 分钟、语音识别 45 分钟。
+
+本地服务启动后执行：
+
+```bash
+ACTIVATION_ADMIN_SECRET=your-admin-secret \
+OFFERGET_API_URL=http://127.0.0.1:3001 \
+npm run activation:generate -- --count 10 --expires-days 30
+```
+
+生产容器中执行（密钥由容器环境自动读取，不会出现在命令历史中）：
+
+```bash
+docker compose exec backend npm run activation:generate -- --count 10 --expires-days 30
+```
+
+`--count` 每次允许 1–100，`--expires-days` 允许 1–365。体验码明文只在生成时输出一次，
+请妥善保存；服务端无法从哈希恢复原始体验码。
 
 生产替换点：将 `MemoryRepository` 替换为具备事务的 PostgreSQL 仓储，将 Mock 支付适配器替换为微信 Native。不要将 `APP_SECRET`、邮件授权码或模型密钥放入客户端或日志。

@@ -1,10 +1,11 @@
 {
   "name": "offerget-server",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "activation:generate": "node dist/generate-activation-codes.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

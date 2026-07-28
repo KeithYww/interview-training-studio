@@ -24,6 +24,8 @@ const api = {
   createCheckout: (productCode: 'single_session' | 'ten_session') =>
     ipcRenderer.invoke('offerget:checkout', productCode),
   getOrder: (orderNo: string) => ipcRenderer.invoke('offerget:order', orderNo),
+  redeemActivationCode: (code: string) =>
+    ipcRenderer.invoke('offerget:redeem-activation-code', code),
   markOrderPaid: (orderNo: string) => ipcRenderer.invoke('offerget:mark-paid', orderNo),
 
   // Update app state

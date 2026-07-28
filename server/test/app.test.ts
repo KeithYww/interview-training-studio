@@ -215,6 +215,114 @@ test('试用、语音次数与付款发卡闭环', async () => {
   await app.close()
 })
 
+test('体验码只能生成后一次性兑换，并授予 60 分钟截图和 45 分钟语音权益', async () => {
+  const app = buildApp({
+    secret: 'test',
+    adminSecret: 'activation-admin-test',
+    devCodes: true,
+    asrProvider: mockAsrProvider,
+    visionProvider: mockVisionProvider
+  })
+  await app.ready()
+
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/admin/activation-codes',
+        payload: { count: 2 }
+      })
+    ).statusCode,
+    404
+  )
+  const generated = await app.inject({
+    method: 'POST',
+    url: '/v1/admin/activation-codes',
+    headers: { 'x-activation-admin-secret': 'activation-admin-test' },
+    payload: { count: 2, expiresInDays: 30 }
+  })
+  assert.equal(generated.statusCode, 200)
+  const codes = generated.json().codes as string[]
+  assert.equal(codes.length, 2)
+  assert.match(codes[0], /^OGET(?:-[A-Z2-9]{4}){4}$/)
+
+  const firstLogin = await login(app, 'activation-one@qq.com')
+  const secondLogin = await login(app, 'activation-two@qq.com')
+  const firstTrial = (
+    await app.inject({
+      method: 'POST',
+      url: '/v1/practice-sessions/start',
+      headers: auth(firstLogin.accessToken)
+    })
+  ).json().session
+  await app.inject({
+    method: 'POST',
+    url: `/v1/practice-sessions/${firstTrial.id}/stop`,
+    headers: auth(firstLogin.accessToken)
+  })
+
+  const redeemed = await app.inject({
+    method: 'POST',
+    url: '/v1/activation-codes/redeem',
+    headers: auth(firstLogin.accessToken),
+    payload: { code: codes[0].toLowerCase() }
+  })
+  assert.equal(redeemed.statusCode, 200)
+  assert.deepEqual(redeemed.json().benefit, {
+    interviews: 1,
+    screenshotMinutes: 60,
+    voiceMinutes: 45
+  })
+  assert.equal(redeemed.json().entitlements.passes.activation, 1)
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/activation-codes/redeem',
+        headers: auth(secondLogin.accessToken),
+        payload: { code: codes[0] }
+      })
+    ).statusCode,
+    409
+  )
+
+  const activationSession = (
+    await app.inject({
+      method: 'POST',
+      url: '/v1/practice-sessions/start',
+      headers: auth(firstLogin.accessToken)
+    })
+  ).json().session
+  assert.equal(activationSession.kind, 'activation')
+  const screenshotDuration =
+    Date.parse(activationSession.expiresAt) - Date.parse(activationSession.startedAt)
+  const voiceDuration =
+    Date.parse(activationSession.voiceExpiresAt) - Date.parse(activationSession.startedAt)
+  assert.equal(screenshotDuration, 60 * 60_000)
+  assert.equal(voiceDuration, 45 * 60_000)
+  const asr = await app.inject({
+    method: 'POST',
+    url: '/v1/asr-trials/start',
+    headers: auth(firstLogin.accessToken),
+    payload: { sessionId: activationSession.id }
+  })
+  assert.equal(asr.statusCode, 200)
+  assert.equal(asr.json().asrSession.expiresAt, activationSession.voiceExpiresAt)
+
+  const concurrent = await Promise.all(
+    [firstLogin.accessToken, secondLogin.accessToken].map((accessToken) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/activation-codes/redeem',
+        headers: auth(accessToken),
+        payload: { code: codes[1] }
+      })
+    )
+  )
+  assert.deepEqual(concurrent.map((response) => response.statusCode).sort(), [200, 409])
+  await app.close()
+})
+
 test('截图网关向模型转发图片和题目上下文并按请求去重', async () => {
   lastVisionRequest = undefined
   let calls = 0
@@ -400,7 +508,10 @@ test('语音网关就绪后才扣免费次数并转发文本', async () => {
     })
     socket.on('error', reject)
   })
-  assert.equal(messages.some((message) => message.type === 'ready'), true)
+  assert.equal(
+    messages.some((message) => message.type === 'ready'),
+    true
+  )
   assert.equal(messages.find((message) => message.type === 'transcript')?.text, '语音联调成功')
   assert.equal(
     (
@@ -432,7 +543,10 @@ test('语音网关就绪后才扣免费次数并转发文本', async () => {
     if (socket.readyState === WebSocket.CLOSED) resolve()
     else socket.once('close', () => resolve())
   })
-  assert.equal(messages.some((message) => message.type === 'stopped'), true)
+  assert.equal(
+    messages.some((message) => message.type === 'stopped'),
+    true
+  )
   await app.close()
 })
 

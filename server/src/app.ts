@@ -12,9 +12,10 @@ export type User = { id: string; email: string; createdAt: string }
 export type Session = {
   id: string
   userId: string
-  kind: 'trial' | 'paid'
+  kind: 'trial' | 'paid' | 'activation'
   startedAt: string
   expiresAt: string
+  voiceExpiresAt?: string
   stoppedAt?: string
 }
 export type Order = {
@@ -28,7 +29,17 @@ export type Order = {
   fulfilledAt?: string
 }
 type EmailCode = { hash: string; expiresAt: number; attempts: number; lastSentAt: number }
-export type PassBalance = { count: number; expiresAt: number }
+export type PassBalance = {
+  count: number
+  expiresAt: number
+  kind?: 'paid' | 'activation'
+}
+export type ActivationCode = {
+  createdAt: string
+  expiresAt: string
+  redeemedAt?: string
+  redeemedBy?: string
+}
 type AsrSession = {
   id: string
   practiceSessionId: string
@@ -53,6 +64,17 @@ const id = (prefix: string) => `${prefix}_${randomBytes(12).toString('hex')}`
 const validEmail = (email: unknown): email is string =>
   typeof email === 'string' && /^[^\s@]+@qq\.com$/i.test(email.trim())
 const normalizeEmail = (email: string) => email.trim().toLowerCase()
+const normalizeActivationCode = (code: string) => code.trim().toUpperCase()
+const ACTIVATION_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+function activationCode() {
+  const bytes = randomBytes(16)
+  let value = ''
+  for (let index = 0; index < 16; index += 1) {
+    value += ACTIVATION_ALPHABET[bytes[index] % ACTIVATION_ALPHABET.length]
+  }
+  return `OGET-${value.match(/.{1,4}/g)!.join('-')}`
+}
 
 export class MemoryRepository {
   usersByEmail = new Map<string, User>()
@@ -62,6 +84,7 @@ export class MemoryRepository {
   trialUsed = new Set<string>()
   voiceUses = new Map<string, number>()
   passes = new Map<string, PassBalance[]>()
+  activationCodes = new Map<string, ActivationCode>()
   sessions = new Map<string, Session>()
   orders = new Map<string, Order>()
   checkoutKeys = new Map<string, string>()
@@ -105,9 +128,15 @@ export function buildApp(
     emailSender?: EmailSender
     asrProvider?: AsrProvider
     visionProvider?: VisionProvider
+    adminSecret?: string
   } = {}
 ) {
   const secret = options.secret ?? process.env.APP_SECRET ?? 'local-development-secret'
+  const adminSecret =
+    options.adminSecret?.trim() ||
+    process.env.ACTIVATION_ADMIN_SECRET?.trim() ||
+    process.env.APP_SECRET?.trim() ||
+    secret
   const devCodes = options.devCodes ?? process.env.DEV_EMAIL_CODES !== 'false'
   const repo = options.repository ?? new MemoryRepository()
   const emailSender = options.emailSender
@@ -161,19 +190,40 @@ export function buildApp(
     if (!user) error(reply, 401, 'AUTH_REQUIRED', '请先登录')
     return user
   }
+  const requireAdmin = (request: FastifyRequest, reply: Parameters<typeof error>[0]): boolean => {
+    const supplied = request.headers['x-activation-admin-secret']
+    if (
+      typeof supplied !== 'string' ||
+      supplied.length !== adminSecret.length ||
+      !timingSafeEqual(Buffer.from(supplied), Buffer.from(adminSecret))
+    ) {
+      error(reply, 404, 'NOT_FOUND', '资源不存在')
+      return false
+    }
+    return true
+  }
+  const redemptionAttempts = new Map<string, number[]>()
   const activeSession = (userId: string) =>
     [...repo.sessions.values()].find(
       (s) => s.userId === userId && !s.stoppedAt && Date.parse(s.expiresAt) > now()
     )
   const activePasses = (userId: string) =>
     (repo.passes.get(userId) ?? []).filter((p) => p.expiresAt > now() && p.count > 0)
+  const passCount = (userId: string, kind: 'paid' | 'activation') =>
+    activePasses(userId)
+      .filter((pass) => (pass.kind ?? 'paid') === kind)
+      .reduce((sum, pass) => sum + pass.count, 0)
   const entitlement = (user: User) => ({
     user,
     trial: {
       screenshot: { used: repo.trialUsed.has(user.id), durationMinutes: 45 },
       voice: { remaining: Math.max(0, 3 - (repo.voiceUses.get(user.id) ?? 0)), durationMinutes: 15 }
     },
-    passes: { available: activePasses(user.id).reduce((sum, pass) => sum + pass.count, 0) },
+    passes: {
+      available: activePasses(user.id).reduce((sum, pass) => sum + pass.count, 0),
+      paid: passCount(user.id, 'paid'),
+      activation: passCount(user.id, 'activation')
+    },
     screenshotTrial: { used: repo.trialUsed.has(user.id), durationMinutes: 45 },
     voiceTrial: {
       remaining: Math.max(0, 3 - (repo.voiceUses.get(user.id) ?? 0)),
@@ -213,12 +263,7 @@ export function buildApp(
     const url = new URL(request.url || '/', 'http://127.0.0.1')
     const ticketId = url.searchParams.get('ticket')
     const ticket = ticketId ? repo.asrTickets.get(ticketId) : undefined
-    if (
-      !ticket ||
-      ticket.consumed ||
-      ticket.expiresAt <= now() ||
-      !asrProvider
-    ) {
+    if (!ticket || ticket.consumed || ticket.expiresAt <= now() || !asrProvider) {
       client.send(
         JSON.stringify({
           type: 'error',
@@ -241,8 +286,7 @@ export function buildApp(
       upstream?.close()
       repo.asrConnecting.delete(ticket.asrSession.practiceSessionId)
       if (
-        repo.activeAsrSessions.get(ticket.asrSession.practiceSessionId)?.id ===
-        ticket.asrSession.id
+        repo.activeAsrSessions.get(ticket.asrSession.practiceSessionId)?.id === ticket.asrSession.id
       )
         repo.activeAsrSessions.delete(ticket.asrSession.practiceSessionId)
       repo.asrClosers.delete(ticket.asrSession.practiceSessionId)
@@ -276,11 +320,7 @@ export function buildApp(
           return
         }
         const practice = repo.sessions.get(ticket.asrSession.practiceSessionId)
-        if (
-          !practice ||
-          practice.stoppedAt ||
-          Date.parse(practice.expiresAt) <= now()
-        ) {
+        if (!practice || practice.stoppedAt || Date.parse(practice.expiresAt) <= now()) {
           connection.close()
           send({ type: 'error', message: '面试已结束，语音识别已停止' })
           closeAll()
@@ -422,6 +462,73 @@ export function buildApp(
     await repo.persist()
     return tokens
   })
+  app.post('/v1/admin/activation-codes', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return
+    const { count: requestedCount, expiresInDays: requestedExpiry } = (request.body ?? {}) as {
+      count?: unknown
+      expiresInDays?: unknown
+    }
+    const count =
+      typeof requestedCount === 'number' && Number.isInteger(requestedCount) ? requestedCount : 1
+    const expiresInDays =
+      typeof requestedExpiry === 'number' && Number.isInteger(requestedExpiry)
+        ? requestedExpiry
+        : 30
+    if (count < 1 || count > 100)
+      return error(reply, 400, 'INVALID_COUNT', '每次可生成 1 到 100 个体验码')
+    if (expiresInDays < 1 || expiresInDays > 365)
+      return error(reply, 400, 'INVALID_EXPIRY', '体验码有效期需为 1 到 365 天')
+
+    const expiresAt = iso(now() + expiresInDays * 86400_000)
+    const codes: string[] = []
+    while (codes.length < count) {
+      const code = activationCode()
+      const codeHash = hash(normalizeActivationCode(code))
+      if (repo.activationCodes.has(codeHash)) continue
+      repo.activationCodes.set(codeHash, { createdAt: iso(), expiresAt })
+      codes.push(code)
+    }
+    await repo.persist()
+    return { codes, expiresAt, benefit: { screenshotMinutes: 60, voiceMinutes: 45 } }
+  })
+  app.post('/v1/activation-codes/redeem', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const attemptKey = `${user.id}:${request.ip}`
+    const recentAttempts = (redemptionAttempts.get(attemptKey) ?? []).filter(
+      (attemptAt) => now() - attemptAt < 10 * 60_000
+    )
+    if (recentAttempts.length >= 8)
+      return error(reply, 429, 'RATE_LIMITED', '尝试次数过多，请 10 分钟后再试')
+    recentAttempts.push(now())
+    redemptionAttempts.set(attemptKey, recentAttempts)
+
+    const { code } = (request.body ?? {}) as { code?: unknown }
+    if (
+      typeof code !== 'string' ||
+      !/^OGET(?:-[A-Z2-9]{4}){4}$/.test(normalizeActivationCode(code))
+    )
+      return error(reply, 400, 'INVALID_ACTIVATION_CODE', '体验码格式不正确')
+    const record = repo.activationCodes.get(hash(normalizeActivationCode(code)))
+    if (!record) return error(reply, 400, 'INVALID_ACTIVATION_CODE', '体验码无效')
+    if (record.redeemedAt) return error(reply, 409, 'ACTIVATION_CODE_USED', '该体验码已被使用')
+    if (Date.parse(record.expiresAt) <= now())
+      return error(reply, 410, 'ACTIVATION_CODE_EXPIRED', '该体验码已过期')
+
+    record.redeemedAt = iso()
+    record.redeemedBy = user.id
+    repo.passes.set(user.id, [
+      ...(repo.passes.get(user.id) ?? []),
+      { count: 1, expiresAt: now() + 30 * 86400_000, kind: 'activation' }
+    ])
+    redemptionAttempts.delete(attemptKey)
+    await repo.persist()
+    return {
+      redeemed: true,
+      benefit: { interviews: 1, screenshotMinutes: 60, voiceMinutes: 45 },
+      entitlements: entitlement(user)
+    }
+  })
   app.get('/v1/me/entitlements', async (request, reply) => {
     const user = requireUser(request, reply)
     return user ? entitlement(user) : undefined
@@ -436,18 +543,22 @@ export function buildApp(
       repo.trialUsed.add(user.id)
       kind = 'trial'
     } else {
-      const pass = activePasses(user.id)[0]
+      const pass =
+        activePasses(user.id).find((candidate) => candidate.kind === 'activation') ??
+        activePasses(user.id)[0]
       if (!pass) return error(reply, 403, 'NO_ENTITLEMENT', '没有可用次卡')
       pass.count -= 1
-      kind = 'paid'
+      kind = pass.kind === 'activation' ? 'activation' : 'paid'
     }
     const duration = kind === 'trial' ? 45 : 60
+    const startedAt = now()
     const session: Session = {
       id: id('ps'),
       userId: user.id,
       kind,
-      startedAt: iso(),
-      expiresAt: iso(now() + duration * 60_000)
+      startedAt: iso(startedAt),
+      expiresAt: iso(startedAt + duration * 60_000),
+      ...(kind === 'activation' ? { voiceExpiresAt: iso(startedAt + 45 * 60_000) } : {})
     }
     repo.sessions.set(session.id, session)
     await repo.persist()
@@ -467,8 +578,7 @@ export function buildApp(
   app.post('/v1/asr-trials/start', async (request, reply) => {
     const user = requireUser(request, reply)
     if (!user) return
-    if (!asrProvider)
-      return error(reply, 503, 'ASR_UNAVAILABLE', '服务器尚未配置语音识别服务')
+    if (!asrProvider) return error(reply, 503, 'ASR_UNAVAILABLE', '服务器尚未配置语音识别服务')
     const { sessionId } = (request.body ?? {}) as { sessionId?: string }
     const session = sessionId && repo.sessions.get(sessionId)
     if (!session || session.userId !== user.id || session.stoppedAt)
@@ -476,12 +586,16 @@ export function buildApp(
     if (Date.parse(session.expiresAt) <= now())
       return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
     if (
-      repo.asrConnecting.has(session.id) ||
-      repo.activeAsrSessions.has(session.id)
+      session.kind === 'activation' &&
+      session.voiceExpiresAt &&
+      Date.parse(session.voiceExpiresAt) <= now()
     )
+      return error(reply, 403, 'VOICE_ENTITLEMENT_EXPIRED', '本场体验码的 45 分钟语音权益已结束')
+    if (repo.asrConnecting.has(session.id) || repo.activeAsrSessions.has(session.id))
       return error(reply, 409, 'ASR_ALREADY_ACTIVE', '本场面试的语音识别已在运行')
     const idempotencyKey = request.headers['idempotency-key']
-    const requestKey = typeof idempotencyKey === 'string' ? `${user.id}:${idempotencyKey}` : undefined
+    const requestKey =
+      typeof idempotencyKey === 'string' ? `${user.id}:${idempotencyKey}` : undefined
     const existing = requestKey && repo.asrStartKeys.get(requestKey)
     if (existing && existing.expiresAt > now() && !existing.consumed)
       return {
@@ -492,8 +606,7 @@ export function buildApp(
     if (session.kind === 'trial') {
       const used = repo.voiceUses.get(user.id) ?? 0
       const pending = pendingVoiceReservations(user.id)
-      if (used + pending >= 3)
-        return error(reply, 403, 'NO_ENTITLEMENT', '免费语音次数已用完')
+      if (used + pending >= 3) return error(reply, 403, 'NO_ENTITLEMENT', '免费语音次数已用完')
     }
     const asrSession: AsrSession = {
       id: id('asr'),
@@ -502,7 +615,9 @@ export function buildApp(
       expiresAt:
         session.kind === 'paid'
           ? session.expiresAt
-          : iso(Math.min(Date.parse(session.expiresAt), now() + 15 * 60_000)),
+          : session.kind === 'activation'
+            ? session.voiceExpiresAt!
+            : iso(Math.min(Date.parse(session.expiresAt), now() + 15 * 60_000)),
       billed: false
     }
     const ticket: AsrTicket = {
@@ -557,7 +672,11 @@ export function buildApp(
       const product = PRODUCTS[order.productCode]
       repo.passes.set(order.userId, [
         ...(repo.passes.get(order.userId) ?? []),
-        { count: product.passes, expiresAt: now() + product.passDays * 86400_000 }
+        {
+          count: product.passes,
+          expiresAt: now() + product.passDays * 86400_000,
+          kind: 'paid'
+        }
       ])
       order.status = 'paid'
       order.passesGranted = product.passes
@@ -581,8 +700,7 @@ export function buildApp(
       return error(reply, 403, 'NO_ACTIVE_SESSION', '需要活跃练习会话')
     if (Date.parse(session.expiresAt) <= now())
       return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
-    if (!visionProvider)
-      return error(reply, 503, 'MODEL_UNAVAILABLE', '服务器尚未配置问答模型')
+    if (!visionProvider) return error(reply, 503, 'MODEL_UNAVAILABLE', '服务器尚未配置问答模型')
     if (
       !requestId ||
       typeof prompt !== 'string' ||

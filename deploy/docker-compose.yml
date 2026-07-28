@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -27,7 +27,8 @@ services:
       PORT: 3001
       APP_VERSION: ${BUILD_SHA:-development}
       APP_SECRET: ${APP_SECRET}
-      DEV_EMAIL_CODES: "false"
+      ACTIVATION_ADMIN_SECRET: ${ACTIVATION_ADMIN_SECRET:-}
+      DEV_EMAIL_CODES: 'false'
       CORS_ORIGIN: ${PUBLIC_ORIGIN}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       SMTP_HOST: ${SMTP_HOST}
@@ -60,8 +61,8 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:80"
-      - "8443:443"
+      - '8080:80'
+      - '8443:443'
     volumes:
       - caddy_data:/data
       - caddy_config:/config

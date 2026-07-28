@@ -1,6 +1,6 @@
 {
   "name": "offerget",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "description": "offerGet - AI 驱动的编程练习与复盘助手",
   "main": "./out/main/index.js",
   "scripts": {
@@ -19,7 +19,8 @@
     "build:linux": "electron-vite build && electron-builder --linux",
     "server:dev": "tsx watch server/src/index.ts",
     "server:start": "tsx server/src/index.ts",
-    "server:test": "tsx --test server/test/**/*.test.ts"
+    "server:test": "tsx --test server/test/**/*.test.ts",
+    "activation:generate": "tsx server/src/generate-activation-codes.ts"
   },
   "repository": {
     "type": "git",

@@ -1,6 +1,7 @@
 import { Pool } from 'pg'
 import {
   MemoryRepository,
+  type ActivationCode,
   type Order,
   type PassBalance,
   type Session,
@@ -14,6 +15,7 @@ type RepositorySnapshot = {
   trialUsed: string[]
   voiceUses: [string, number][]
   passes: [string, PassBalance[]][]
+  activationCodes?: [string, ActivationCode][]
   sessions: [string, Session][]
   orders: [string, Order][]
   checkoutKeys: [string, string][]
@@ -57,6 +59,7 @@ export class PostgresRepository extends MemoryRepository {
       trialUsed: [...this.trialUsed],
       voiceUses: [...this.voiceUses.entries()],
       passes: [...this.passes.entries()],
+      activationCodes: [...this.activationCodes.entries()],
       sessions: [...this.sessions.entries()],
       orders: [...this.orders.entries()],
       checkoutKeys: [...this.checkoutKeys.entries()],
@@ -71,6 +74,7 @@ export class PostgresRepository extends MemoryRepository {
     this.trialUsed = new Set(state.trialUsed ?? [])
     this.voiceUses = new Map(state.voiceUses ?? [])
     this.passes = new Map(state.passes ?? [])
+    this.activationCodes = new Map(state.activationCodes ?? [])
     this.sessions = new Map(state.sessions ?? [])
     this.orders = new Map(state.orders ?? [])
     this.checkoutKeys = new Map(state.checkoutKeys ?? [])
