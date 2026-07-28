@@ -31,9 +31,8 @@ for required in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD APP_SECRET SMTP_HOST
   fi
 done
 
-set -a
-. "$ENV_FILE"
-set +a
+POSTGRES_DB=$(sed -n 's/^POSTGRES_DB=//p' "$ENV_FILE" | tail -1)
+POSTGRES_USER=$(sed -n 's/^POSTGRES_USER=//p' "$ENV_FILE" | tail -1)
 
 if sudo docker ps --format '{{.Names}}' | grep -qx 'offerget-postgres-1'; then
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
