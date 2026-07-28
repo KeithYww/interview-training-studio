@@ -11,6 +11,7 @@ const baseUrl = (process.env.OFFERGET_API_URL || defaultBaseUrl).replace(/\/$/, 
 type Tokens = { accessToken: string; refreshToken: string }
 let tokens: Tokens | null = null
 let tokensHydrated = false
+let refreshPromise: Promise<void> | null = null
 
 const tokenFilePath = () => join(app.getPath('userData'), 'offerget-auth.bin')
 
@@ -37,6 +38,22 @@ async function saveTokens(next: Tokens | null) {
   }
   const encrypted = safeStorage.encryptString(JSON.stringify(next))
   await writeFile(tokenFilePath(), encrypted, { mode: 0o600 })
+}
+
+async function refreshAuthTokens(): Promise<void> {
+  if (refreshPromise) return refreshPromise
+  if (!tokens?.refreshToken)
+    throw new OfferGetError('登录状态已失效，请重新登录', 'AUTH_REQUIRED')
+  const refreshToken = tokens.refreshToken
+  refreshPromise = request<Tokens>('/v1/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken })
+  })
+    .then((refreshed) => saveTokens(refreshed))
+    .finally(() => {
+      refreshPromise = null
+    })
+  return refreshPromise
 }
 
 export type PracticeSession = { id: string; expiresAt: string; kind?: 'trial' | 'paid' }
@@ -106,10 +123,7 @@ async function authenticatedRequest<T>(path: string, init: RequestInit = {}): Pr
     return await request<T>(path, init, true)
   } catch (error) {
     if (!(error instanceof OfferGetError) || error.code !== 'AUTH_REQUIRED' || !tokens?.refreshToken) throw error
-    const refreshed = await request<Tokens>('/v1/auth/refresh', {
-      method: 'POST', body: JSON.stringify({ refreshToken: tokens.refreshToken })
-    })
-    await saveTokens(refreshed)
+    await refreshAuthTokens()
     return request<T>(path, init, true)
   }
 }
@@ -119,11 +133,7 @@ async function authenticatedResponse(path: string, init: RequestInit = {}): Prom
   if (response.status === 401 && tokens?.refreshToken) {
     const error = await responseError(response.clone())
     if (error.code === 'AUTH_REQUIRED') {
-      const refreshed = await request<Tokens>('/v1/auth/refresh', {
-        method: 'POST',
-        body: JSON.stringify({ refreshToken: tokens.refreshToken })
-      })
-      await saveTokens(refreshed)
+      await refreshAuthTokens()
       response = await fetchResponse(path, init, true)
     }
   }

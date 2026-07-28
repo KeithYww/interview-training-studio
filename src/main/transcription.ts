@@ -153,7 +153,7 @@ ipcMain.handle('start-transcription', async (_event, practiceSessionId: string) 
   })
 })
 
-ipcMain.handle('stop-transcription', () => {
+export function stopTranscription(): void {
   const current = socket
   if (!current) {
     emitStopped()
@@ -168,7 +168,9 @@ ipcMain.handle('stop-transcription', () => {
   } else {
     current.close()
   }
-})
+}
+
+ipcMain.handle('stop-transcription', () => stopTranscription())
 
 ipcMain.on('transcription-audio-chunk', (_event, chunk: ArrayBuffer) => {
   const audio = Buffer.from(new Uint8Array(chunk))

@@ -19,6 +19,7 @@ const api = {
   getEntitlements: () => ipcRenderer.invoke('offerget:entitlements'),
   startPracticeSession: () => ipcRenderer.invoke('offerget:start-session'),
   stopPracticeSession: (id: string) => ipcRenderer.invoke('offerget:stop-session', id),
+  clearInterviewWorkspace: () => ipcRenderer.invoke('clearInterviewWorkspace'),
   startAsrTrial: (sessionId: string) => ipcRenderer.invoke('offerget:start-asr', sessionId),
   createCheckout: (productCode: 'single_session' | 'ten_session') =>
     ipcRenderer.invoke('offerget:checkout', productCode),

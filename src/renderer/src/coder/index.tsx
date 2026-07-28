@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/lib/store/app'
 import { useTranscriptionStore } from '@/lib/store/transcription'
 import { useSolutionStore } from '@/lib/store/solution'
@@ -11,6 +11,7 @@ import { TranscriptionBar } from './TranscriptionBar'
 
 export default function CoderPage() {
   const [interviewActive, setInterviewActive] = useState(false)
+  const previousInterviewActive = useRef<boolean | null>(null)
   const { syncAppState } = useAppStore()
   const { isTranscribing, setIsTranscribing, setTranscriptionText, clearText } =
     useTranscriptionStore()
@@ -36,6 +37,14 @@ export default function CoderPage() {
       const isActive = Boolean(active)
       setInterviewActive(isActive)
       void window.api.updateAppState({ interviewActive: isActive })
+      if (
+        data &&
+        !isActive &&
+        (previousInterviewActive.current === null || previousInterviewActive.current)
+      ) {
+        void window.api.clearInterviewWorkspace()
+      }
+      previousInterviewActive.current = isActive
       if (!isActive && useTranscriptionStore.getState().isTranscribing) {
         stopAudioCapture()
         void window.api.stopTranscription()

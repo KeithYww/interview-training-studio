@@ -5,7 +5,11 @@ import { takeScreenshot } from './take-screenshot'
 import { saveScreenshotToDisk } from './save-screenshot'
 import { getSolutionStream, getFollowUpStream, getGeneralStream } from './ai'
 import { state } from './state'
-import { getTranscriptionText, clearTranscriptionText } from './transcription'
+import {
+  getTranscriptionText,
+  clearTranscriptionText,
+  stopTranscription
+} from './transcription'
 import { offergetApi } from './offerget-api'
 
 /**
@@ -518,6 +522,27 @@ ipcMain.handle('stopSolutionStream', () => {
   if (!currentStreamContext) return false
   abortCurrentStream('user')
   return true
+})
+
+export function clearInterviewWorkspace(): void {
+  abortCurrentStream('new-request')
+  conversationMessages = []
+  recentScreenshots = []
+  hasAppendSeparator = false
+  stopTranscription()
+  clearTranscriptionText()
+
+  const mainWindow = global.mainWindow
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('solution-clear')
+  mainWindow.webContents.send('screenshots-updated', [])
+  mainWindow.webContents.send('transcription-cleared')
+  mainWindow.webContents.send('ai-loading-end')
+}
+
+ipcMain.handle('clearInterviewWorkspace', () => {
+  clearInterviewWorkspace()
+  return { ok: true }
 })
 
 ipcMain.handle('sendFollowUpQuestion', async (_event, question: string) => {

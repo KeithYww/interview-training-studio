@@ -92,6 +92,7 @@ export function InterviewStartPanel() {
     const result = (await window.api.startPracticeSession()) as ApiResult
     setBusy(false)
     if (result.ok) {
+      await window.api.clearInterviewWorkspace()
       setNotice('面试已开始，截图识别已解锁')
       await refresh()
       return
@@ -107,6 +108,7 @@ export function InterviewStartPanel() {
     const result = (await window.api.stopPracticeSession(active.id)) as ApiResult
     setBusy(false)
     if (result.ok) {
+      await window.api.clearInterviewWorkspace()
       setNotice('本场面试已结束')
       await refresh()
       return

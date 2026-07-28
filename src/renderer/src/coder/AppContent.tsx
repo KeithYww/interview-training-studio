@@ -151,7 +151,7 @@ export function AppContent() {
       <InterviewStartPanel />
 
       {/* Error Banner */}
-      {errorMessage && (
+      {interviewAccess === 'active' && errorMessage && (
         <div className="mb-4 mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg flex items-start gap-3">
           <svg
             className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5"
@@ -188,7 +188,9 @@ export function AppContent() {
       )}
 
       {/* Screenshot Gallery */}
-      {recentScreenshots.length > 0 ? (
+      {interviewAccess !== 'active' ? (
+        <ShortcutTip access={interviewAccess} />
+      ) : recentScreenshots.length > 0 ? (
         <div className="mb-4 flex gap-2 overflow-x-auto pb-2">
           {recentScreenshots.map((data, index) => (
             <img
@@ -213,7 +215,9 @@ export function AppContent() {
       )}
 
       {/* Solution Display */}
-      <MarkdownRenderer>{solutionChunks.join('')}</MarkdownRenderer>
+      {interviewAccess === 'active' && (
+        <MarkdownRenderer>{solutionChunks.join('')}</MarkdownRenderer>
+      )}
     </div>
   )
 }
