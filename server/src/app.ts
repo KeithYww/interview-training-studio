@@ -73,7 +73,7 @@ export class MemoryRepository {
   paidEvents = new Set<string>()
   screenshotRequests = new Map<string, string>()
 
-  async persist() {
+  async persist(): Promise<void> {
     return undefined
   }
 
@@ -81,7 +81,7 @@ export class MemoryRepository {
     return { database: false, persistent: false }
   }
 
-  async close() {
+  async close(): Promise<void> {
     return undefined
   }
 }
