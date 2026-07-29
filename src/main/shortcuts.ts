@@ -3,12 +3,7 @@ import type { BrowserWindow } from 'electron'
 import type { ModelMessage } from './model-message'
 import { takeScreenshot } from './take-screenshot'
 import { saveScreenshotToDisk } from './save-screenshot'
-import {
-  getSolutionStream,
-  getFollowUpStream,
-  getGeneralStream,
-  getVoiceAnswerStream
-} from './ai'
+import { getSolutionStream, getFollowUpStream, getGeneralStream, getVoiceAnswerStream } from './ai'
 import { state } from './state'
 import {
   getTranscriptionText,
@@ -17,6 +12,7 @@ import {
   setFinalTranscriptHandler
 } from './transcription'
 import { offergetApi } from './offerget-api'
+import { reassertInterviewWindowOnTop } from './settings'
 
 /**
  * Extract meaningful error message from API errors
@@ -92,7 +88,7 @@ function showMainWindow(window: BrowserWindow) {
   } else {
     window.show()
   }
-
+  reassertInterviewWindowOnTop()
 }
 
 function abortCurrentStream(reason: AbortReason) {
@@ -147,7 +143,7 @@ async function answerTranscribedQuestion(question: string): Promise<void> {
   }
   mainWindow.webContents.send(
     'solution-chunk',
-    `### 面试官问题\n\n${normalizedQuestion}\n\n### 参考回答\n\n`
+    `### 语音转录\n\n${normalizedQuestion}\n\n### 问题识别与参考回答\n\n`
   )
   mainWindow.webContents.send('ai-loading-start')
 

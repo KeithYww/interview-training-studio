@@ -1,6 +1,9 @@
 import { app, dialog, ipcMain } from 'electron'
 
 let interviewModeActive = false
+let interviewWindowGuard: NodeJS.Timeout | null = null
+
+const INTERVIEW_WINDOW_GUARD_INTERVAL_MS = 1_000
 
 ipcMain.handle('getAppSettings', () => {
   return settings
@@ -39,10 +42,64 @@ function refreshAppIconVisibility(): void {
   applyDockVisibility(settings.hideDockIcon || interviewModeActive)
 }
 
+function stopInterviewWindowGuard(): void {
+  if (!interviewWindowGuard) return
+  clearInterval(interviewWindowGuard)
+  interviewWindowGuard = null
+}
+
+function enforceInterviewWindowOnTop(moveToTop = false): void {
+  const mainWindow = global.mainWindow
+  if (!interviewModeActive || !mainWindow || mainWindow.isDestroyed()) return
+
+  // Reassert the native z-order because macOS can demote a transparent window
+  // after another app enters full screen or the assistant is hidden and shown.
+  mainWindow.setAlwaysOnTop(true, 'screen-saver', process.platform === 'darwin' ? 1 : 0)
+  if (moveToTop && mainWindow.isVisible()) {
+    mainWindow.moveTop()
+  }
+}
+
+function startInterviewWindowGuard(): void {
+  stopInterviewWindowGuard()
+  interviewWindowGuard = setInterval(() => {
+    enforceInterviewWindowOnTop(true)
+  }, INTERVIEW_WINDOW_GUARD_INTERVAL_MS)
+}
+
+function refreshInterviewWindowBehavior(): void {
+  const mainWindow = global.mainWindow
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  if (interviewModeActive) {
+    if (process.platform === 'darwin') {
+      mainWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      })
+    }
+    enforceInterviewWindowOnTop(true)
+    startInterviewWindowGuard()
+    return
+  }
+
+  stopInterviewWindowGuard()
+  mainWindow.setAlwaysOnTop(false)
+  if (process.platform === 'darwin') {
+    mainWindow.setVisibleOnAllWorkspaces(false)
+  }
+}
+
+/** Restore z-order after show/restore without activating or focusing the assistant. */
+export function reassertInterviewWindowOnTop(): void {
+  enforceInterviewWindowOnTop(true)
+}
+
 /** Interview mode temporarily overrides the user's normal Dock/taskbar preference. */
 export function setInterviewModeActive(active: boolean): void {
   interviewModeActive = active
   refreshAppIconVisibility()
+  refreshInterviewWindowBehavior()
 }
 
 ipcMain.handle('selectScreenshotDir', async () => {

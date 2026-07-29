@@ -54,19 +54,22 @@ app.whenReady().then(() => {
   // A standard desktop app must remain visible in the Dock/taskbar.
   applyDockVisibility(false)
 
-  // Auto-approve getDisplayMedia for system audio loopback capture
+  // Capture system audio without showing the screen/window sharing picker.
+  // Electron 39 uses CoreAudio Tap on supported macOS versions and loopback on Windows.
   session.defaultSession.setDisplayMediaRequestHandler(
     (_request, callback) => {
       desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
         if (sources.length > 0) {
           callback({
             video: sources[0],
-            ...(process.platform === 'win32' ? { audio: 'loopback' as const } : {})
+            ...(process.platform === 'darwin' || process.platform === 'win32'
+              ? { audio: 'loopback' as const }
+              : {})
           })
         }
       })
     },
-    { useSystemPicker: process.platform === 'darwin' }
+    { useSystemPicker: false }
   )
 
   // Auto-approve microphone access so users can enumerate and select audio input devices

@@ -95,7 +95,9 @@ export function createDashScopeAsrProviderFromEnv(): AsrProvider | undefined {
                 parameters: {
                   format: 'pcm',
                   sample_rate: 16000,
-                  max_sentence_silence: 600
+                  // Keep the provider's conversational default. A shorter threshold
+                  // splits one interviewer question into several final sentences.
+                  max_sentence_silence: 1300
                 },
                 input: {}
               }

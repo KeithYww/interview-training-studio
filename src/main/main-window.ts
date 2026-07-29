@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { shell, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { reassertInterviewWindowOnTop } from './settings'
 
 export function createWindow(): void {
   // Create the browser window.
@@ -30,8 +31,12 @@ export function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    reassertInterviewWindowOnTop()
     // Standard visible desktop window; do not hide it from system UI or other apps.
   })
+
+  mainWindow.on('show', reassertInterviewWindowOnTop)
+  mainWindow.on('restore', reassertInterviewWindowOnTop)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)

@@ -7,6 +7,13 @@ export type VisionRequest = {
   images: string[]
   prompt: string
   systemPrompt?: string
+  messages?: VisionConversationMessage[]
+}
+
+export type VisionConversationMessage = {
+  role: 'user' | 'assistant'
+  text: string
+  images?: string[]
 }
 
 export interface VisionProvider {
@@ -53,8 +60,36 @@ function requestBody(
   systemPrompt: string | undefined,
   model: string,
   imageDetail: 'low' | 'auto' | 'high',
-  stream: boolean
+  stream: boolean,
+  conversation?: VisionConversationMessage[]
 ) {
+  const conversationMessages =
+    conversation && conversation.length > 0
+      ? conversation.map((message) => ({
+          role: message.role,
+          content:
+            message.role === 'user'
+              ? [
+                  ...(message.text.trim() ? [{ type: 'text', text: message.text.trim() }] : []),
+                  ...(message.images ?? []).map((image) => ({
+                    type: 'image_url',
+                    image_url: { url: normalizeImage(image), detail: imageDetail }
+                  }))
+                ]
+              : message.text
+        }))
+      : [
+          {
+            role: 'user',
+            content: [
+              ...images.map((image) => ({
+                type: 'image_url',
+                image_url: { url: normalizeImage(image), detail: imageDetail }
+              })),
+              { type: 'text', text: prompt.trim() || '请识别并解答截图中的面试题。' }
+            ]
+          }
+        ]
   return {
     model,
     stream,
@@ -65,16 +100,7 @@ function requestBody(
           systemPrompt?.trim() ||
           (images.length > 0 ? DEFAULT_SYSTEM_PROMPT : DEFAULT_VOICE_SYSTEM_PROMPT)
       },
-      {
-        role: 'user',
-        content: [
-          ...images.map((image) => ({
-            type: 'image_url',
-            image_url: { url: normalizeImage(image), detail: imageDetail }
-          })),
-          { type: 'text', text: prompt.trim() || '请识别并解答截图中的面试题。' }
-        ]
-      }
+      ...conversationMessages
     ],
     temperature: 0.2,
     max_tokens: 2_000
@@ -95,18 +121,14 @@ export function createVisionProviderFromEnv(): VisionProvider | undefined {
   const baseUrl = (
     process.env.SILICONFLOW_BASE_URL?.trim() || 'https://api.siliconflow.cn/v1'
   ).replace(/\/$/, '')
-  const model =
-    process.env.SILICONFLOW_VISION_MODEL?.trim() || 'Qwen/Qwen3-VL-32B-Instruct'
+  const model = process.env.SILICONFLOW_VISION_MODEL?.trim() || 'Qwen/Qwen3-VL-32B-Instruct'
   const configuredDetail = process.env.SILICONFLOW_IMAGE_DETAIL?.trim()
   const imageDetail: 'low' | 'auto' | 'high' =
     configuredDetail === 'low' || configuredDetail === 'auto' ? configuredDetail : 'high'
-  const timeoutMs = Math.max(
-    5_000,
-    Number(process.env.SILICONFLOW_VISION_TIMEOUT_MS) || 90_000
-  )
+  const timeoutMs = Math.max(5_000, Number(process.env.SILICONFLOW_VISION_TIMEOUT_MS) || 90_000)
 
   return {
-    async analyze({ images, prompt, systemPrompt }) {
+    async analyze({ images, prompt, systemPrompt, messages }) {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), timeoutMs)
       try {
@@ -117,7 +139,7 @@ export function createVisionProviderFromEnv(): VisionProvider | undefined {
             'content-type': 'application/json'
           },
           body: JSON.stringify(
-            requestBody(images, prompt, systemPrompt, model, imageDetail, false)
+            requestBody(images, prompt, systemPrompt, model, imageDetail, false, messages)
           ),
           signal: controller.signal
         })
@@ -135,7 +157,7 @@ export function createVisionProviderFromEnv(): VisionProvider | undefined {
         clearTimeout(timeout)
       }
     },
-    async *stream({ images, prompt, systemPrompt }) {
+    async *stream({ images, prompt, systemPrompt, messages }) {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), timeoutMs)
       try {
@@ -146,7 +168,7 @@ export function createVisionProviderFromEnv(): VisionProvider | undefined {
             'content-type': 'application/json'
           },
           body: JSON.stringify(
-            requestBody(images, prompt, systemPrompt, model, imageDetail, true)
+            requestBody(images, prompt, systemPrompt, model, imageDetail, true, messages)
           ),
           signal: controller.signal
         })

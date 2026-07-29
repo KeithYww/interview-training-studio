@@ -128,10 +128,10 @@ export function AccountDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto border-white/10 bg-slate-950 text-slate-100">
+      <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto border-indigo-300/15 bg-[#0d0d16]/95 text-slate-100 shadow-2xl shadow-black/50 backdrop-blur-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldCheck className="size-5 text-orange-400" />
+            <ShieldCheck className="size-5 text-indigo-300" />
             账户与练习权益
           </DialogTitle>
           <DialogDescription>登录后由服务端统一管理试用、次卡和模型调用。</DialogDescription>
@@ -163,7 +163,7 @@ export function AccountDialog({
               </Button>
               {codeSent && (
                 <Button
-                  className="flex-1 bg-orange-400 text-slate-950 hover:bg-orange-300"
+                  className="flex-1 bg-gradient-to-r from-indigo-500 to-violet-500 text-white hover:from-indigo-400 hover:to-violet-400"
                   disabled={busy || code.length !== 6}
                   onClick={verify}
                 >
@@ -195,13 +195,13 @@ export function AccountDialog({
                 </div>
               </div>
             </div>
-            <div className="rounded-xl border border-orange-400/25 bg-orange-400/5 p-3">
+            <div className="rounded-xl border border-indigo-400/25 bg-indigo-400/5 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 font-medium">
-                  <KeyRound className="size-4 text-orange-400" />
+                  <KeyRound className="size-4 text-indigo-300" />
                   体验码
                 </div>
-                <span className="text-xs text-orange-200">
+                <span className="text-xs text-indigo-200">
                   可用 {entitlements.passes?.activation ?? 0} 次
                 </span>
               </div>
@@ -220,7 +220,7 @@ export function AccountDialog({
                 />
                 <Button
                   data-testid="redeem-activation-code"
-                  className="shrink-0 bg-orange-400 text-slate-950 hover:bg-orange-300"
+                  className="shrink-0 bg-gradient-to-r from-indigo-500 to-violet-500 text-white hover:from-indigo-400 hover:to-violet-400"
                   disabled={busy || activationCode.trim().length < 20}
                   onClick={() => void redeemActivationCode()}
                 >
@@ -230,7 +230,7 @@ export function AccountDialog({
             </div>
             <div className="rounded-xl border border-white/10 p-3">
               <div className="mb-2 flex items-center gap-2 font-medium">
-                <CreditCard className="size-4 text-orange-400" />
+                <CreditCard className="size-4 text-indigo-300" />
                 付费次卡 {entitlements.passes?.paid ?? 0} 次
               </div>
               <div className="flex gap-2">
@@ -241,10 +241,10 @@ export function AccountDialog({
                   onClick={() => checkout('single_session')}
                 >
                   <span>1 次面试</span>
-                  <span className="text-orange-300">¥9.9</span>
+                  <span className="text-indigo-300">¥9.9</span>
                 </Button>
                 <Button
-                  className="h-12 flex-1 bg-orange-400 text-sm font-bold text-slate-950 shadow-md shadow-orange-950/30 hover:bg-orange-300"
+                  className="h-12 flex-1 bg-gradient-to-r from-indigo-500 to-violet-500 text-sm font-bold text-white shadow-md shadow-indigo-950/40 hover:from-indigo-400 hover:to-violet-400"
                   disabled={busy}
                   onClick={() => checkout('ten_session')}
                 >
@@ -255,11 +255,11 @@ export function AccountDialog({
               <p className="mt-2 text-xs text-slate-500">购买成功后不会自动开始面试。</p>
             </div>
             {orderNo && (
-              <div className="rounded-xl border border-dashed border-orange-400/40 p-3 text-sm">
+              <div className="rounded-xl border border-dashed border-indigo-400/40 p-3 text-sm">
                 <div>订单 {orderNo}</div>
                 <Button
                   size="sm"
-                  className="mt-2 bg-orange-500 hover:bg-orange-400"
+                  className="mt-2 bg-indigo-500 hover:bg-indigo-400"
                   disabled={busy}
                   onClick={payMock}
                 >

@@ -7,7 +7,11 @@ export function AccountStatusButton() {
 
   const refresh = useCallback(async () => {
     const result = await window.api.getEntitlements()
-    setEmail(result.ok && result.data?.user?.email ? result.data.user.email : null)
+    if (result.ok && result.data?.user?.email) {
+      setEmail(result.data.user.email)
+    } else if (result.code === 'AUTH_REQUIRED') {
+      setEmail(null)
+    }
   }, [])
 
   useEffect(() => {
@@ -24,7 +28,7 @@ export function AccountStatusButton() {
     <Button
       variant="ghost"
       size="sm"
-      className="h-8 max-w-52 cursor-pointer gap-1.5 rounded-lg text-orange-200 hover:bg-orange-400/10 hover:text-orange-100"
+      className="h-8 max-w-52 cursor-pointer gap-1.5 rounded-lg text-indigo-200 hover:bg-indigo-400/10 hover:text-white"
       title={email ?? 'QQ 邮箱登录'}
       onClick={() => window.dispatchEvent(new Event('offerget:open-account'))}
     >

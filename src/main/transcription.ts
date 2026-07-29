@@ -11,7 +11,10 @@ let stopping = false
 let pendingAudio: Buffer[] = []
 let pendingAudioBytes = 0
 const MAX_PENDING_AUDIO_BYTES = 128 * 1024
-const QUESTION_SETTLE_MS = 1_400
+// Fun-ASR finalizes a sentence after 1.3 seconds of silence. Keep a short
+// additional window to merge adjacent final segments without making the
+// interviewer wait too long for the answer to start.
+const QUESTION_SETTLE_MS = 900
 let pendingQuestion = ''
 let questionTimer: ReturnType<typeof setTimeout> | null = null
 let finalTranscriptHandler: ((question: string) => void | Promise<void>) | null = null

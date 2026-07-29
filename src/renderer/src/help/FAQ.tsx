@@ -49,8 +49,10 @@ const faqs = [
       <span>
         面试开始后，点击“开启语音自动作答”或按下
         <ShortcutRenderer shortcut={`${platformAlt}+T`} className="text-xs mx-1" />
-        即可开始或停止。offerGet 会捕获电脑中面试官的声音，转写出完整问题，并在短暂停顿后自动调用模型流式给出参考回答。免费用户共 3 次，每次最多 15 分钟；付费面试在本场剩余时间内不额外扣次。
-        语音供应商密钥由 offerGet 服务端保管，客户端不需要填写第三方 API Key。
+        即可开始或停止。offerGet
+        会捕获电脑中面试官的声音，转写出完整问题，并在短暂停顿后自动调用模型流式给出参考回答。免费用户共
+        3 次，每次最多 15 分钟；付费面试在本场剩余时间内不额外扣次。 语音供应商密钥由 offerGet
+        服务端保管，客户端不需要填写第三方 API Key。
       </span>
     )
   },
@@ -70,9 +72,9 @@ export function FAQ() {
   return (
     <HelpSection Icon={BookOpen} title="常见问题">
       {faqs.map((faq, index) => (
-        <div key={index} className="border border-gray-400 rounded-lg p-4">
-          <h3 className="font-semibold mb-2">{faq.question}</h3>
-          <p className="text-sm text-gray-700">{faq.answer}</p>
+        <div key={index} className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <h3 className="mb-2 font-semibold">{faq.question}</h3>
+          <p className="text-sm text-slate-300">{faq.answer}</p>
         </div>
       ))}
     </HelpSection>

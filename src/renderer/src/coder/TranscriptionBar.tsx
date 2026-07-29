@@ -14,14 +14,14 @@ export function TranscriptionBar() {
   if (!isTranscribing && !transcriptionText) return null
 
   return (
-    <div className="absolute top-10 left-0 right-0 px-6 pb-2 z-10">
-      <div className="flex items-start gap-2 bg-gray-700/80 rounded-lg pl-2 pr-0 py-1">
+    <div className="relative z-20 my-3">
+      <div className="flex items-start gap-2 rounded-xl border border-indigo-300/15 bg-slate-950/80 py-2.5 pl-3 pr-2 shadow-lg shadow-black/25 backdrop-blur-xl">
         {isTranscribing && (
           <Mic className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0 animate-pulse" />
         )}
         <div
           ref={scrollRef}
-          className="transcription-scroll text-sm text-gray-300 max-h-[4.2em] overflow-y-auto leading-[1.4em] flex-1 whitespace-pre-wrap break-words"
+          className="transcription-scroll max-h-[4.2em] flex-1 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-[1.4em] text-slate-200"
         >
           {transcriptionText || (isTranscribing ? '等待语音输入...' : '')}
         </div>

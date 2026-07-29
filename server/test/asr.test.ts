@@ -13,14 +13,17 @@ test('Fun-ASR 结束事件只发送一次，异常断开不会伪装成正常结
   const webSocketServer = new WebSocketServer({ server })
   let connectionCount = 0
   let finishMessages = 0
+  let sentenceSilenceMs: number | undefined
   webSocketServer.on('connection', (socket) => {
     connectionCount += 1
     const currentConnection = connectionCount
     socket.on('message', (raw) => {
       const message = JSON.parse(raw.toString()) as {
         header?: { action?: string; task_id?: string }
+        payload?: { parameters?: { max_sentence_silence?: number } }
       }
       if (message.header?.action === 'run-task') {
+        sentenceSilenceMs = message.payload?.parameters?.max_sentence_silence
         socket.send(
           JSON.stringify({
             header: { event: 'task-started', task_id: message.header.task_id }
@@ -69,6 +72,7 @@ test('Fun-ASR 结束事件只发送一次，异常断开不会伪装成正常结
     await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(finishMessages, 1)
     assert.equal(finished, 1)
+    assert.equal(sentenceSilenceMs, 1300)
     assert.deepEqual(errors, [])
 
     const disconnected = new Promise<string>((resolve) => {

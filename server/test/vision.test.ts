@@ -20,9 +20,7 @@ test('OpenAI 兼容视觉适配器使用服务端密钥并发送 Base64 Data URL
       receivedBody = JSON.parse(Buffer.concat(chunks).toString())
       if (receivedBody?.stream === true) {
         response.setHeader('content-type', 'text/event-stream')
-        response.write(
-          `data: ${JSON.stringify({ choices: [{ delta: { content: '流式' } }] })}\n\n`
-        )
+        response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '流式' } }] })}\n\n`)
         response.write(
           `data: ${JSON.stringify({ choices: [{ delta: { content: '返回成功' } }] })}\n\n`
         )
@@ -65,9 +63,31 @@ test('OpenAI 兼容视觉适配器使用服务端密钥并发送 Base64 Data URL
       'data:image/png;base64,raw-base64'
     )
     assert.equal(
-      (messages[1]?.content as Array<{ image_url?: { detail?: string } }>)[0]?.image_url
-        ?.detail,
+      (messages[1]?.content as Array<{ image_url?: { detail?: string } }>)[0]?.image_url?.detail,
       'high'
+    )
+    await provider.analyze({
+      images: ['first-image', 'latest-image'],
+      prompt: '兼容字段',
+      systemPrompt: '按顺序理解',
+      messages: [
+        { role: 'user', text: '第一题', images: ['first-image'] },
+        { role: 'assistant', text: '第一题答案' },
+        { role: 'user', text: '请回答最新截图', images: ['latest-image'] }
+      ]
+    })
+    const orderedMessages = receivedBody?.messages as Array<{
+      role: string
+      content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>
+    }>
+    assert.equal(orderedMessages[1]?.role, 'user')
+    assert.equal((orderedMessages[1]?.content as Array<{ text?: string }>)[0]?.text, '第一题')
+    assert.equal(orderedMessages[2]?.role, 'assistant')
+    assert.equal(orderedMessages[2]?.content, '第一题答案')
+    assert.equal(orderedMessages[3]?.role, 'user')
+    assert.equal(
+      (orderedMessages[3]?.content as Array<{ image_url?: { url: string } }>)[1]?.image_url?.url,
+      'data:image/png;base64,latest-image'
     )
     assert.ok(provider.stream)
     const streamed: string[] = []

@@ -57,7 +57,7 @@ export function CustomShortcuts() {
       <div className="space-y-4">
         {/* Window Management */}
         <div className="space-y-2">
-          <h3 className="text-sm text-gray-500">窗口管理</h3>
+          <h3 className="text-sm text-slate-500">窗口管理</h3>
           <Shortcut label="隐藏/显示窗口" shortcut="hideOrShowMainWindow" />
           <Shortcut
             label="鼠标穿透"
@@ -68,7 +68,7 @@ export function CustomShortcuts() {
 
         {/* Screenshot & AI */}
         <div className="space-y-2">
-          <h3 className="text-sm text-gray-500">截图与AI</h3>
+          <h3 className="text-sm text-slate-500">截图与AI</h3>
           <Shortcut
             label="截图"
             description="截图并生成解题建议（会新开对话）"
@@ -94,14 +94,14 @@ export function CustomShortcuts() {
 
         {/* Navigation */}
         <div className="space-y-2">
-          <h3 className="text-sm text-gray-500">页面导航</h3>
+          <h3 className="text-sm text-slate-500">页面导航</h3>
           <Shortcut label="向上翻页" shortcut="pageUp" />
           <Shortcut label="向下翻页" shortcut="pageDown" />
         </div>
 
         {/* Window Movement */}
         <div className="space-y-2">
-          <h3 className="text-sm text-gray-500">窗口移动</h3>
+          <h3 className="text-sm text-slate-500">窗口移动</h3>
           <Shortcut label="向上移动窗口" shortcut="moveMainWindowUp" />
           <Shortcut label="向下移动窗口" shortcut="moveMainWindowDown" />
           <Shortcut label="向左移动窗口" shortcut="moveMainWindowLeft" />
@@ -143,7 +143,7 @@ function Shortcut({
         {!isRecording ? (
           <ShortcutRenderer shortcut={shortcut.key} />
         ) : (
-          <span className="font-mono text-sm align-middle rounded-md pl-2 pr-1 py-1 transition-colors bg-gray-200 animate-pulse">
+          <span className="animate-pulse rounded-md border border-indigo-300/20 bg-indigo-400/10 py-1 pl-2 pr-1 align-middle font-mono text-sm text-indigo-200 transition-colors">
             请按下自定义快捷键...
           </span>
         )}

@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/lib/store/app'
 import { useTranscriptionStore } from '@/lib/store/transcription'
 import { useSolutionStore } from '@/lib/store/solution'
-import { startAudioCapture, stopAudioCapture } from '@/lib/audio-capture'
+import { startAudioCapture, startAudioDelivery, stopAudioCapture } from '@/lib/audio-capture'
 
 import { AppHeader } from './AppHeader'
 import { AppContent } from './AppContent'
 import { AppStatusBar } from './AppStatusBar'
-import { TranscriptionBar } from './TranscriptionBar'
 
 export default function CoderPage() {
   const [interviewActive, setInterviewActive] = useState(false)
@@ -26,14 +25,10 @@ export default function CoderPage() {
 
   useEffect(() => {
     const applyEntitlements = (
-      data:
-        | { activeSession?: { expiresAt: string } | null }
-        | null
-        | undefined
+      data: { activeSession?: { expiresAt: string } | null } | null | undefined
     ) => {
       const active =
-        data?.activeSession &&
-        new Date(data.activeSession.expiresAt).getTime() > Date.now()
+        data?.activeSession && new Date(data.activeSession.expiresAt).getTime() > Date.now()
       const isActive = Boolean(active)
       setInterviewActive(isActive)
       void window.api.updateAppState({ interviewActive: isActive })
@@ -53,7 +48,11 @@ export default function CoderPage() {
     }
     const refresh = async () => {
       const result = await window.api.getEntitlements()
-      applyEntitlements(result.ok ? result.data : null)
+      if (result.ok) {
+        applyEntitlements(result.data)
+      } else if (result.code === 'AUTH_REQUIRED') {
+        applyEntitlements(null)
+      }
     }
     const handleUpdated = (event: Event) => {
       applyEntitlements(
@@ -89,6 +88,7 @@ export default function CoderPage() {
           }
           await startAudioCapture()
           await window.api.startTranscription(sessionId)
+          startAudioDelivery()
           setIsTranscribing(true)
           setErrorMessage(null)
           window.dispatchEvent(new Event('offerget:entitlements-changed'))
@@ -143,9 +143,12 @@ export default function CoderPage() {
 
   return (
     <div className={`relative h-screen ${interviewActive ? 'interview-mode' : ''}`}>
-      {interviewActive ? <div className="interview-drag-strip" aria-hidden="true" /> : <AppHeader />}
+      {interviewActive ? (
+        <div className="interview-drag-strip" aria-hidden="true" />
+      ) : (
+        <AppHeader />
+      )}
       <AppContent />
-      <TranscriptionBar />
       <AppStatusBar />
     </div>
   )

@@ -6,12 +6,21 @@
   }
   body {
     @apply text-foreground;
-    background: #0a1020;
+    background: #0a0a0f;
+    font-family:
+      Inter,
+      ui-sans-serif,
+      -apple-system,
+      BlinkMacSystemFont,
+      'PingFang SC',
+      'Microsoft YaHei',
+      sans-serif;
   }
 }
 
 #app-header {
-  @apply h-12 border-b border-white/10 bg-slate-950/85 px-3 text-white shadow-lg shadow-slate-950/20 backdrop-blur-xl;
+  @apply h-12 border-b border-indigo-300/10 px-3 text-white shadow-lg shadow-black/30 backdrop-blur-2xl;
+  background: rgba(10, 10, 15, 0.88);
   -webkit-app-region: drag;
   .actions {
     -webkit-app-region: no-drag;
@@ -19,14 +28,18 @@
 }
 
 #app-content {
-  @apply h-[calc(100vh-48px)] overflow-y-auto;
+  @apply h-[calc(100vh-48px)] overflow-y-auto text-slate-100;
   background:
-    radial-gradient(circle at 82% -12%, rgba(255, 119, 38, 0.18), transparent 30%),
-    linear-gradient(145deg, #e7edf6 0%, #f7f9fc 48%, #eaf0f9 100%);
+    radial-gradient(ellipse 60% 48% at 18% 2%, rgba(99, 102, 241, 0.2), transparent 65%),
+    radial-gradient(ellipse 50% 42% at 88% 88%, rgba(168, 85, 247, 0.13), transparent 68%),
+    linear-gradient(145deg, rgba(10, 10, 15, 0.98), rgba(19, 19, 32, 0.98));
 }
 
 .interview-mode #app-content {
   @apply h-screen;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 8%, rgba(99, 102, 241, 0.16), transparent 68%),
+    linear-gradient(145deg, rgba(10, 10, 15, 0.72), rgba(19, 19, 32, 0.62));
 }
 
 .interview-drag-strip {
@@ -40,7 +53,7 @@
 }
 
 .offerget-brand-mark {
-  @apply flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-orange-300/30 bg-slate-900 shadow-sm;
+  @apply flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-indigo-300/30 bg-slate-900 shadow-sm shadow-indigo-950/50;
 }
 
 .offerget-brand-mark img {
@@ -52,7 +65,9 @@
 }
 
 .offerget-brand-copy span {
-  @apply text-orange-400;
+  background: linear-gradient(135deg, #818cf8, #c084fc);
+  -webkit-background-clip: text;
+  color: transparent;
 }
 
 .offerget-header-actions {
@@ -61,15 +76,19 @@
 }
 
 .offerget-interview-panel {
-  @apply flex items-center justify-between gap-6 rounded-2xl border border-slate-200/80 bg-white/90 p-5 text-slate-900 shadow-lg shadow-slate-300/30;
+  @apply flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 p-5 text-slate-100 shadow-2xl shadow-black/25 backdrop-blur-2xl;
+  background: rgba(19, 19, 32, 0.82);
 }
 
 .offerget-interview-panel.is-active {
-  @apply border-orange-300/70 bg-orange-50/95 shadow-orange-200/30;
+  @apply sticky top-3 z-40 border-indigo-400/45 shadow-indigo-950/30;
+  background:
+    linear-gradient(120deg, rgba(99, 102, 241, 0.14), rgba(168, 85, 247, 0.08)),
+    rgba(19, 19, 32, 0.94);
 }
 
 .offerget-interview-eyebrow {
-  @apply mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-orange-600;
+  @apply mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300;
 }
 
 .offerget-interview-panel h2 {
@@ -77,11 +96,25 @@
 }
 
 .offerget-interview-panel p {
-  @apply mt-1 text-sm text-slate-500;
+  @apply mt-1 text-sm text-slate-400;
 }
 
 .offerget-primary-action {
-  @apply h-11 shrink-0 rounded-xl bg-orange-500 px-5 font-semibold text-white shadow-md shadow-orange-500/20 hover:bg-orange-400;
+  @apply h-11 shrink-0 rounded-xl border-0 px-5 font-semibold text-white shadow-lg shadow-indigo-950/40 transition hover:-translate-y-0.5 hover:shadow-indigo-500/20;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+}
+
+.offerget-primary-action:hover {
+  background: linear-gradient(135deg, #7577f5, #b462f8);
+}
+
+.offerget-glass-card {
+  @apply rounded-2xl border border-white/10 text-slate-100 shadow-xl shadow-black/20 backdrop-blur-xl;
+  background: rgba(19, 19, 32, 0.78);
+}
+
+.offerget-section-icon {
+  @apply text-indigo-300;
 }
 
 .transcription-scroll {

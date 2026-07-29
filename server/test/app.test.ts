@@ -381,7 +381,17 @@ test('截图网关向模型转发图片和题目上下文并按请求去重', as
     method: 'POST',
     url: '/v1/ai/screenshot',
     headers: { ...auth(accessToken), accept: 'application/x-ndjson' },
-    payload: { ...payload, requestId: 'vision-request-stream' }
+    payload: {
+      sessionId: practice.id,
+      requestId: 'vision-request-stream',
+      prompt: payload.prompt,
+      systemPrompt: payload.systemPrompt,
+      messages: [
+        { role: 'user', text: '第一题', images: ['first-image'] },
+        { role: 'assistant', text: '第一题答案' },
+        { role: 'user', text: '请识别最新截图', images: ['second-image'] }
+      ]
+    }
   })
   assert.equal(streamed.statusCode, 200)
   const streamEvents = streamed.body
@@ -394,6 +404,11 @@ test('截图网关向模型转发图片和题目上下文并按请求去重', as
   )
   assert.equal(streamEvents.at(-1)?.type, 'done')
   assert.equal(calls, 2)
+  assert.deepEqual(lastVisionRequest?.messages, [
+    { role: 'user', text: '第一题', images: ['first-image'] },
+    { role: 'assistant', text: '第一题答案' },
+    { role: 'user', text: '请识别最新截图', images: ['second-image'] }
+  ])
   await app.close()
 })
 

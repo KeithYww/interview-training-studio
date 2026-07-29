@@ -19,9 +19,9 @@ export function SceneQuickSwitch() {
   const { scenes, activeSceneId, setActiveScene } = useSettingsStore()
 
   return (
-    <section className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white/80 px-4 py-3 text-slate-700 shadow-sm backdrop-blur">
+    <section className="offerget-glass-card mt-3 flex flex-wrap items-center gap-2 px-4 py-3">
       <div className="mr-1 flex items-center gap-1.5 text-sm font-semibold">
-        <Sparkles className="size-4 text-orange-500" />
+        <Sparkles className="size-4 text-violet-300" />
         作答场景
       </div>
       {scenes.map((scene) => (
@@ -33,8 +33,8 @@ export function SceneQuickSwitch() {
           className={cn(
             'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
             scene.id === activeSceneId
-              ? 'border-orange-500 bg-orange-500 text-white shadow-sm'
-              : 'border-slate-300 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600'
+              ? 'border-indigo-400/60 bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-md shadow-indigo-950/40'
+              : 'border-white/10 bg-white/5 text-slate-300 hover:border-indigo-400/45 hover:bg-indigo-400/10 hover:text-white'
           )}
           onClick={() => setActiveScene(scene.id)}
         >
@@ -44,7 +44,7 @@ export function SceneQuickSwitch() {
       <Button
         variant="ghost"
         size="sm"
-        className="ml-auto h-7 rounded-full px-2.5 text-xs text-slate-500 hover:text-orange-600"
+        className="ml-auto h-7 rounded-full px-2.5 text-xs text-slate-400 hover:bg-indigo-400/10 hover:text-indigo-200"
         asChild
       >
         <Link to="/settings">
@@ -57,14 +57,8 @@ export function SceneQuickSwitch() {
 }
 
 export function SceneManagerCard() {
-  const {
-    scenes,
-    activeSceneId,
-    setActiveScene,
-    updateScenePrompt,
-    addScene,
-    removeScene
-  } = useSettingsStore()
+  const { scenes, activeSceneId, setActiveScene, updateScenePrompt, addScene, removeScene } =
+    useSettingsStore()
   const [addOpen, setAddOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPrompt, setNewPrompt] = useState('')
@@ -86,14 +80,14 @@ export function SceneManagerCard() {
 
   return (
     <>
-      <section className="rounded-lg bg-gray-300/80 p-6">
+      <section className="offerget-glass-card p-6">
         <div className="mb-3 flex items-start justify-between gap-4">
           <div>
             <h2 className="flex items-center text-lg font-semibold">
               <Sparkles className="mr-2 size-5" />
               作答场景
             </h2>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-slate-400">
               截图识题与语音自动作答都会使用当前场景的提示词。
             </p>
           </div>
@@ -110,8 +104,8 @@ export function SceneManagerCard() {
               className={cn(
                 'flex items-center overflow-hidden rounded-full border text-sm transition-colors',
                 scene.id === activeSceneId
-                  ? 'border-orange-500 bg-orange-500 text-white'
-                  : 'border-gray-300 bg-white text-gray-700'
+                  ? 'border-indigo-400/60 bg-gradient-to-r from-indigo-500 to-violet-500 text-white'
+                  : 'border-white/10 bg-white/5 text-slate-300'
               )}
             >
               <button
@@ -138,9 +132,7 @@ export function SceneManagerCard() {
         {activeScene && (
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-sm font-medium">
-                「{activeScene.name}」系统提示词
-              </label>
+              <label className="text-sm font-medium">「{activeScene.name}」系统提示词</label>
               {activeScene.isPreset && (
                 <Button
                   type="button"
@@ -148,10 +140,7 @@ export function SceneManagerCard() {
                   size="sm"
                   className="h-7 px-2 text-xs"
                   onClick={() =>
-                    updateScenePrompt(
-                      activeScene.id,
-                      PRESET_SCENE_PROMPTS[activeScene.id] ?? ''
-                    )
+                    updateScenePrompt(activeScene.id, PRESET_SCENE_PROMPTS[activeScene.id] ?? '')
                   }
                 >
                   <RotateCcw className="size-3.5" />
@@ -163,11 +152,11 @@ export function SceneManagerCard() {
               value={activeScene.prompt}
               maxLength={20_000}
               rows={7}
-              className="min-h-36 bg-white"
+              className="min-h-36 border-white/10 bg-white/5"
               placeholder="描述这个场景下模型应如何理解问题和组织答案"
               onChange={(event) => updateScenePrompt(activeScene.id, event.target.value)}
             />
-            <p className="mt-1 text-xs text-gray-500">修改会自动保存在本机，并立即同步给模型。</p>
+            <p className="mt-1 text-xs text-slate-500">修改会自动保存在本机，并立即同步给模型。</p>
           </div>
         )}
       </section>

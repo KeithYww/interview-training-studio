@@ -10,6 +10,7 @@ type Tokens = { accessToken: string; refreshToken: string }
 let tokens: Tokens | null = null
 let tokensHydrated = false
 let refreshPromise: Promise<void> | null = null
+let entitlementsPromise: Promise<Entitlements> | null = null
 
 const tokenFilePath = () => join(app.getPath('userData'), 'offerget-auth.bin')
 
@@ -65,6 +66,11 @@ export type AsrSession = {
   userId: string
   expiresAt: string
   billed: boolean
+}
+export type ScreenshotConversationMessage = {
+  role: 'user' | 'assistant'
+  text: string
+  images?: string[]
 }
 export type Entitlements = {
   user?: { id: string; email: string }
@@ -128,6 +134,8 @@ async function request<T>(path: string, init: RequestInit = {}, authenticated = 
 }
 
 async function authenticatedRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  await hydrateTokens()
+  const attemptedAccessToken = tokens?.accessToken
   try {
     return await request<T>(path, init, true)
   } catch (error) {
@@ -137,22 +145,35 @@ async function authenticatedRequest<T>(path: string, init: RequestInit = {}): Pr
       !tokens?.refreshToken
     )
       throw error
+    if (tokens.accessToken !== attemptedAccessToken) {
+      return request<T>(path, init, true)
+    }
     await refreshAuthTokens()
     return request<T>(path, init, true)
   }
 }
 
 async function authenticatedResponse(path: string, init: RequestInit = {}): Promise<Response> {
+  await hydrateTokens()
+  const attemptedAccessToken = tokens?.accessToken
   let response = await fetchResponse(path, init, true)
   if (response.status === 401 && tokens?.refreshToken) {
     const error = await responseError(response.clone())
     if (error.code === 'AUTH_REQUIRED') {
-      await refreshAuthTokens()
+      if (tokens.accessToken === attemptedAccessToken) await refreshAuthTokens()
       response = await fetchResponse(path, init, true)
     }
   }
   if (!response.ok) throw await responseError(response)
   return response
+}
+
+function fetchEntitlements(): Promise<Entitlements> {
+  if (entitlementsPromise) return entitlementsPromise
+  entitlementsPromise = authenticatedRequest<Entitlements>('/v1/me/entitlements').finally(() => {
+    entitlementsPromise = null
+  })
+  return entitlementsPromise
 }
 
 type ScreenshotStreamEvent =
@@ -176,7 +197,7 @@ export const offergetApi = {
     return { user: result.user }
   },
   logout: () => saveTokens(null),
-  entitlements: () => authenticatedRequest<Entitlements>('/v1/me/entitlements'),
+  entitlements: fetchEntitlements,
   async activeSession() {
     const entitlements = await this.entitlements()
     if (!entitlements.activeSession?.id)
@@ -242,12 +263,19 @@ export const offergetApi = {
     prompt: string,
     systemPrompt?: string,
     requestId = randomUUID(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    messages?: ScreenshotConversationMessage[]
   ): AsyncIterable<string> {
     const response = await authenticatedResponse('/v1/ai/screenshot', {
       method: 'POST',
       headers: { accept: 'application/x-ndjson' },
-      body: JSON.stringify({ sessionId, requestId, images, prompt, systemPrompt }),
+      body: JSON.stringify({
+        sessionId,
+        requestId,
+        prompt,
+        systemPrompt,
+        ...(messages ? { messages } : { images })
+      }),
       signal
     })
     if (!response.body) throw new OfferGetError('服务未返回生成数据', 'EMPTY_RESPONSE')

@@ -1,7 +1,13 @@
+import { useSettingsStore } from '@/lib/store/settings'
+
 let mediaStream: MediaStream | null = null
 let audioContext: AudioContext | null = null
 let processor: ScriptProcessorNode | null = null
 let silentGain: GainNode | null = null
+let deliveryEnabled = false
+let pendingAudio: ArrayBuffer[] = []
+let pendingAudioBytes = 0
+const MAX_PENDING_AUDIO_BYTES = 96 * 1024
 
 function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
   const ratio = sourceRate / 16000
@@ -12,14 +18,38 @@ function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
     const s = Math.max(-1, Math.min(1, float32[sourceIndex]))
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
   }
-  window.api.sendTranscriptionAudioChunk(int16.buffer)
+  const chunk = int16.buffer
+  if (deliveryEnabled) {
+    window.api.sendTranscriptionAudioChunk(chunk)
+    return
+  }
+  pendingAudio.push(chunk)
+  pendingAudioBytes += chunk.byteLength
+  while (pendingAudioBytes > MAX_PENDING_AUDIO_BYTES && pendingAudio.length > 1) {
+    pendingAudioBytes -= pendingAudio.shift()!.byteLength
+  }
 }
 
 async function openSystemAudioStream(): Promise<MediaStream> {
-  const stream = await navigator.mediaDevices.getDisplayMedia({
+  const capture = navigator.mediaDevices.getDisplayMedia({
     audio: true,
     video: true
   })
+  let timeoutId = 0
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error('电脑声音捕获启动超时')), 5_000)
+  })
+  let stream: MediaStream
+  try {
+    stream = await Promise.race([capture, timeout])
+  } catch (error) {
+    void capture
+      .then((lateStream) => lateStream.getTracks().forEach((track) => track.stop()))
+      .catch(() => undefined)
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
   stream.getVideoTracks().forEach((t) => t.stop())
   if (stream.getAudioTracks().length === 0) {
     stream.getTracks().forEach((t) => t.stop())
@@ -28,8 +58,34 @@ async function openSystemAudioStream(): Promise<MediaStream> {
   return stream
 }
 
+async function openMicrophoneStream(deviceId?: string): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({
+    audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    video: false
+  })
+}
+
 export async function startAudioCapture(): Promise<void> {
-  const stream = await openSystemAudioStream()
+  deliveryEnabled = false
+  pendingAudio = []
+  pendingAudioBytes = 0
+  const { audioInputDeviceId } = useSettingsStore.getState()
+  let stream: MediaStream
+  if (audioInputDeviceId) {
+    try {
+      stream = await openMicrophoneStream(audioInputDeviceId)
+    } catch (error) {
+      console.warn('Failed to open selected audio input, falling back to microphone:', error)
+      stream = await openMicrophoneStream()
+    }
+  } else {
+    try {
+      stream = await openSystemAudioStream()
+    } catch (error) {
+      console.warn('Failed to capture system audio, falling back to microphone:', error)
+      stream = await openMicrophoneStream()
+    }
+  }
   mediaStream = stream
 
   audioContext = new AudioContext({ sampleRate: 16000 })
@@ -49,7 +105,17 @@ export async function startAudioCapture(): Promise<void> {
   silentGain.connect(audioContext.destination)
 }
 
+export function startAudioDelivery(): void {
+  deliveryEnabled = true
+  for (const chunk of pendingAudio) window.api.sendTranscriptionAudioChunk(chunk)
+  pendingAudio = []
+  pendingAudioBytes = 0
+}
+
 export function stopAudioCapture(): void {
+  deliveryEnabled = false
+  pendingAudio = []
+  pendingAudioBytes = 0
   if (processor) {
     processor.disconnect()
     processor = null

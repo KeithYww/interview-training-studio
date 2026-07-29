@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Clock3, LogIn, Mic, MicOff, Play, StopCircle, WalletCards } from 'lucide-react'
+import { Clock3, LogIn, Mic, MicOff, Play, RefreshCw, StopCircle, WalletCards } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTranscriptionStore } from '@/lib/store/transcription'
 import {
@@ -44,18 +44,26 @@ export function InterviewStartPanel() {
   const [now, setNow] = useState(Date.now())
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [endConfirmOpen, setEndConfirmOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   const refresh = useCallback(async () => {
+    setLoading(true)
     const result = (await window.api.getEntitlements()) as ApiResult
     if (result.ok && result.data) {
       setEntitlements(result.data)
+      setLoadError('')
       window.dispatchEvent(
         new CustomEvent('offerget:entitlements-updated', { detail: result.data })
       )
-    } else {
+    } else if (result.code === 'AUTH_REQUIRED') {
       setEntitlements(null)
+      setLoadError('')
       window.dispatchEvent(new CustomEvent('offerget:entitlements-updated', { detail: null }))
+    } else {
+      setLoadError(result.message || '暂时无法读取账户权益')
     }
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -123,6 +131,42 @@ export function InterviewStartPanel() {
     setNotice(result.message || '暂时无法结束面试')
   }
 
+  if (!entitlements && loading) {
+    return (
+      <section className="offerget-interview-panel">
+        <div>
+          <div className="offerget-interview-eyebrow">面试工作台</div>
+          <h2>正在读取账户权益</h2>
+          <p>正在同步登录状态和可用面试次数，请稍候。</p>
+        </div>
+        <Button className="offerget-primary-action" disabled>
+          <RefreshCw className="size-4 animate-spin" />
+          正在加载
+        </Button>
+      </section>
+    )
+  }
+
+  if (!entitlements && loadError) {
+    return (
+      <section className="offerget-interview-panel">
+        <div>
+          <div className="offerget-interview-eyebrow">权益同步失败</div>
+          <h2>登录状态仍会保留</h2>
+          <p>{loadError}，请重试，不需要重新登录。</p>
+        </div>
+        <Button
+          className="offerget-primary-action"
+          disabled={loading}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+          重新加载
+        </Button>
+      </section>
+    )
+  }
+
   if (!entitlements?.user) {
     return (
       <section className="offerget-interview-panel">
@@ -156,7 +200,7 @@ export function InterviewStartPanel() {
                 : '次卡'}
           </div>
           <h2 className="flex items-center gap-2">
-            <Clock3 className="size-5 text-orange-500" />
+            <Clock3 className="size-5 text-indigo-300" />
             剩余 {remainingLabel}
           </h2>
           <p>
@@ -165,15 +209,15 @@ export function InterviewStartPanel() {
               : '截图模型尚未配置，面试计时可用，但截图识别暂不可用。'}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Button
             type="button"
             data-testid="toggle-transcription"
             variant="outline"
             className={
               isTranscribing
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/15 hover:text-emerald-200'
+                : 'border-white/15 bg-white/5 text-slate-100 hover:border-indigo-400/50 hover:bg-indigo-400/10 hover:text-white'
             }
             disabled={busy || !entitlements.features?.voiceRecognition || activationVoiceExpired}
             onClick={(event) => {
@@ -198,7 +242,7 @@ export function InterviewStartPanel() {
             type="button"
             data-testid="end-interview"
             variant="outline"
-            className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+            className="border-rose-400/35 bg-rose-400/10 text-rose-300 hover:border-rose-300/60 hover:bg-rose-400/20 hover:text-rose-200"
             disabled={busy}
             onClick={(event) => {
               event.stopPropagation()

@@ -5,7 +5,7 @@ import cors from '@fastify/cors'
 import WebSocket, { WebSocketServer } from 'ws'
 import type { EmailSender } from './email'
 import type { AsrConnection, AsrProvider } from './asr'
-import type { VisionProvider } from './vision'
+import type { VisionConversationMessage, VisionProvider } from './vision'
 
 type ProductCode = 'single_session' | 'ten_session'
 export type User = { id: string; email: string; createdAt: string }
@@ -792,13 +792,15 @@ export function buildApp(
   app.post('/v1/ai/screenshot', { bodyLimit: 30 * 1024 * 1024 }, async (request, reply) => {
     const user = requireUser(request, reply)
     if (!user) return
-    const { sessionId, requestId, image, images, prompt, systemPrompt } = (request.body ?? {}) as {
+    const { sessionId, requestId, image, images, prompt, systemPrompt, messages } = (request.body ??
+      {}) as {
       sessionId?: string
       requestId?: string
       image?: string
       images?: string[]
       prompt?: string
       systemPrompt?: string
+      messages?: VisionConversationMessage[]
     }
     const session = sessionId && repo.sessions.get(sessionId)
     if (!session || session.userId !== user.id || session.stoppedAt)
@@ -807,13 +809,39 @@ export function buildApp(
       return error(reply, 403, 'SESSION_EXPIRED', '练习会话已到期')
     if (!visionProvider)
       return error(reply, 503, 'VISION_UNAVAILABLE', '服务器尚未配置截图识别模型')
-    const inputImages = Array.isArray(images) ? images : image ? [image] : []
+    const messageImages = Array.isArray(messages)
+      ? messages.flatMap((message) => (Array.isArray(message?.images) ? message.images : []))
+      : []
+    const inputImages = Array.isArray(images) ? images : image ? [image] : messageImages
+    const validMessages =
+      messages === undefined ||
+      (Array.isArray(messages) &&
+        messages.length > 0 &&
+        messages.length <= 12 &&
+        messages.every(
+          (message) =>
+            (message.role === 'user' || message.role === 'assistant') &&
+            typeof message.text === 'string' &&
+            (message.images === undefined ||
+              (Array.isArray(message.images) &&
+                message.images.every((value) => typeof value === 'string' && value.length > 0)))
+        ))
+    const messageTextLength = Array.isArray(messages)
+      ? messages.reduce(
+          (size, message) => size + (typeof message?.text === 'string' ? message.text.length : 0),
+          0
+        )
+      : 0
     if (
       !requestId ||
       inputImages.length === 0 ||
       inputImages.length > 5 ||
       inputImages.some((value) => typeof value !== 'string' || value.length === 0) ||
-      inputImages.reduce((size, value) => size + value.length, 0) > 25 * 1024 * 1024
+      inputImages.reduce((size, value) => size + value.length, 0) > 25 * 1024 * 1024 ||
+      !validMessages ||
+      messageImages.length > 5 ||
+      messageImages.reduce((size, value) => size + value.length, 0) > 25 * 1024 * 1024 ||
+      messageTextLength > 20_000
     )
       return error(reply, 400, 'INVALID_SCREENSHOT', '截图请求参数无效或图片过大')
     if ((prompt?.length ?? 0) > 20_000 || (systemPrompt?.length ?? 0) > 20_000)
@@ -844,7 +872,8 @@ export function buildApp(
           for await (const chunk of visionProvider.stream!({
             images: inputImages,
             prompt: prompt || '请识别并解答截图中的面试题。',
-            systemPrompt
+            systemPrompt,
+            ...(messages ? { messages } : {})
           })) {
             if (!chunk) continue
             firstChunkAt ??= Date.now()
@@ -889,7 +918,8 @@ export function buildApp(
       const answer = await visionProvider.analyze({
         images: inputImages,
         prompt: prompt || '请识别并解答截图中的面试题。',
-        systemPrompt
+        systemPrompt,
+        ...(messages ? { messages } : {})
       })
       repo.screenshotRequests.set(dedupeKey, answer)
       return { answer }
