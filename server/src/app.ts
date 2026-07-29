@@ -219,7 +219,7 @@ export function buildApp(
   }
   const getAdmin = (request: FastifyRequest) => {
     const token = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1]
-    const payload = token && verify(token)
+    const payload = token ? verify(token) : undefined
     return payload?.role === 'admin' ? payload : undefined
   }
   const requireAdminSession = (
