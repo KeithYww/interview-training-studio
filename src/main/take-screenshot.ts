@@ -17,7 +17,7 @@ export async function takeScreenshot(): Promise<string> {
     const permission = systemPreferences.getMediaAccessStatus('screen')
     if (permission === 'denied' || permission === 'restricted') {
       throw new ScreenshotCaptureError(
-        'macOS 未允许 offerGet 录制屏幕。请前往“系统设置 → 隐私与安全性 → 屏幕与系统音频录制”授权，然后完全退出并重新打开 offerGet'
+        'macOS 尚未向当前 offerGet 进程开放屏幕录制权限。请确认系统设置中的 offerGet 已开启，然后点击“重启 offerGet”。仅关闭窗口不会退出应用。'
       )
     }
   }

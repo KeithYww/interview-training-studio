@@ -51,6 +51,9 @@ const api = {
     ipcRenderer.invoke('updateShortcuts', shortcuts),
   triggerShortcutAction: (action: 'takeScreenshot' | 'appendScreenshot') =>
     ipcRenderer.invoke('triggerShortcutAction', action),
+  getScreenCaptureAccess: () => ipcRenderer.invoke('screen-capture:status'),
+  openScreenCaptureSettings: () => ipcRenderer.invoke('screen-capture:open-settings'),
+  relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
 
   // Listen for screenshot events
   onScreenshotTaken: (callback: (screenshotData: string) => void) => {

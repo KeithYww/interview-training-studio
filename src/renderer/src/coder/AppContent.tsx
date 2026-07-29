@@ -29,6 +29,8 @@ export function AppContent() {
 
   const [recentScreenshots, setRecentScreenshots] = useState<string[]>([])
   const [interviewAccess, setInterviewAccess] = useState<InterviewAccess>('loading')
+  const hasScreenCapturePermissionError =
+    errorMessage?.includes('屏幕录制权限') || errorMessage?.includes('屏幕与系统音频录制')
 
   useEffect(() => {
     const applyEntitlements = (data: EntitlementSnapshot | null | undefined) => {
@@ -37,8 +39,7 @@ export function AppContent() {
         return
       }
       const active =
-        data.activeSession &&
-        new Date(data.activeSession.expiresAt).getTime() > Date.now()
+        data.activeSession && new Date(data.activeSession.expiresAt).getTime() > Date.now()
       setInterviewAccess(active ? 'active' : 'not-started')
     }
     const refreshAccess = async () => {
@@ -171,6 +172,25 @@ export function AppContent() {
           <div className="flex-1 min-w-0">
             <p className="text-red-400 font-medium text-sm">暂时无法完成操作</p>
             <p className="text-red-300/80 text-sm mt-0.5 break-words">{errorMessage}</p>
+            {hasScreenCapturePermissionError && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void window.api.openScreenCaptureSettings()}
+                  className="border-red-400/40 bg-white/80 text-red-700 hover:bg-white"
+                >
+                  打开系统设置
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void window.api.relaunchApp()}
+                  className="bg-red-600 text-white hover:bg-red-700"
+                >
+                  我已授权，重启 offerGet
+                </Button>
+              </div>
+            )}
           </div>
           <button
             onClick={() => setErrorMessage(null)}
@@ -229,18 +249,11 @@ function ShortcutTip({ access }: { access: InterviewAccess }) {
   const [shortcutFailed, setShortcutFailed] = useState(false)
 
   useEffect(() => {
-    const applyStatus = (
-      snapshot:
-        | Record<string, { status?: string }>
-        | null
-        | undefined
-    ) => {
+    const applyStatus = (snapshot: Record<string, { status?: string }> | null | undefined) => {
       setShortcutFailed(snapshot?.takeScreenshot?.status === 'failed')
     }
     const handleStatus = (event: Event) => {
-      applyStatus(
-        (event as CustomEvent<Record<string, { status?: string }>>).detail
-      )
+      applyStatus((event as CustomEvent<Record<string, { status?: string }>>).detail)
     }
     void window.api.getShortcuts().then(applyStatus)
     window.addEventListener('offerget:shortcuts-status', handleStatus)
@@ -276,9 +289,7 @@ function ShortcutTip({ access }: { access: InterviewAccess }) {
       >
         立即截屏
       </Button>
-      {shortcutFailed && (
-        <p className="text-sm text-orange-700">可在“设置 → 快捷键”中更换组合键</p>
-      )}
+      {shortcutFailed && <p className="text-sm text-orange-700">可在“设置 → 快捷键”中更换组合键</p>}
     </div>
   )
 }

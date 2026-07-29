@@ -34,9 +34,11 @@ import './offerget-api'
 import { createWindow } from './main-window'
 import { initAutoUpdater } from './auto-updater'
 import { applyDockVisibility } from './settings'
+import { registerScreenPermissionHandlers } from './screen-permissions'
 
 app.setName('offerGet')
 process.title = 'offerGet'
+registerScreenPermissionHandlers()
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
