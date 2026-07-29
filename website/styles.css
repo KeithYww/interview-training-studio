@@ -822,11 +822,15 @@ nav a:hover {
 }
 .price small {
   font-size: 21px;
-  vertical-align: 18px;
 }
-.price sup {
-  font-size: 20px;
-  vertical-align: 20px;
+.price-money {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.price-money small {
+  color: #3b4658;
+  font-weight: 740;
 }
 .price-pass {
   display: flex;
