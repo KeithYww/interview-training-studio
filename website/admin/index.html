@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>offerGet · 运营后台</title>
+    <link rel="stylesheet" href="/admin/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section id="login-view" class="login-card">
+        <span class="eyebrow">OFFERGET / OPERATIONS</span>
+        <h1>运营后台</h1>
+        <p>仅限已授权的运营人员。登录凭证不会持久化到服务器。</p>
+        <form id="login-form">
+          <label>后台管理密码<input id="password" type="password" autocomplete="current-password" required /></label>
+          <button type="submit">安全登录</button>
+          <p class="form-message" id="login-message"></p>
+        </form>
+      </section>
+
+      <section id="console-view" class="console hidden">
+        <header class="topbar">
+          <div><span class="eyebrow">OFFERGET / OPERATIONS</span><h1>经营与权益管理</h1></div>
+          <div class="topbar-actions"><span id="updated-at"></span><button class="secondary" id="refresh">刷新</button><button class="secondary" id="logout">退出</button></div>
+        </header>
+        <nav class="tabs" aria-label="后台导航">
+          <button data-tab="overview" class="active">总览</button><button data-tab="users">用户与权益</button><button data-tab="codes">体验码</button><button data-tab="orders">订单</button><button data-tab="audit">操作日志</button>
+        </nav>
+        <p id="global-message" class="form-message"></p>
+
+        <section id="tab-overview" class="tab-panel">
+          <div id="metrics" class="metrics"></div>
+          <div class="notice"><strong>支付状态：</strong>当前客户端仍是模拟收款。后台可查看订单与权益，但不会将“待支付”手工改为已支付；真实微信支付回调、签名验签、退款与对账将作为支付二期接入。</div>
+        </section>
+
+        <section id="tab-users" class="tab-panel hidden">
+          <div class="panel-head"><div><h2>用户与权益</h2><p>搜索 QQ 邮箱或用户 ID；补发权益会留下审计记录。</p></div><input id="user-query" placeholder="搜索邮箱 / 用户 ID" /></div>
+          <div class="table-wrap"><table><thead><tr><th>用户</th><th>注册时间</th><th>试用</th><th>语音</th><th>可用次数</th><th>当前会话</th><th></th></tr></thead><tbody id="users-table"></tbody></table></div>
+        </section>
+
+        <section id="tab-codes" class="tab-panel hidden">
+          <div class="split"><form id="generate-codes" class="form-card"><h2>生成体验码</h2><p>每个体验码仅能兑换一次：1 场面试、60 分钟截图、45 分钟语音。</p><label>数量<input name="count" type="number" min="1" max="100" value="10" required /></label><label>有效期（天）<input name="expiresInDays" type="number" min="1" max="365" value="30" required /></label><label>批次备注<input name="label" maxlength="60" placeholder="如：小红书 8 月首批" /></label><button type="submit">生成并显示一次</button></form><div class="form-card"><h2>本次生成结果</h2><p>请立即复制保存。为安全起见，后台之后只显示末四位与核销状态。</p><textarea id="generated-codes" readonly placeholder="尚未生成体验码"></textarea><button id="copy-codes" class="secondary" type="button">复制体验码</button></div></div>
+          <div class="panel-head"><div><h2>体验码核销</h2><p>支持查看有效、已兑换与已撤销的体验码。</p></div></div><div class="table-wrap"><table><thead><tr><th>标识</th><th>批次</th><th>备注</th><th>创建 / 到期</th><th>状态</th><th>兑换用户</th></tr></thead><tbody id="codes-table"></tbody></table></div>
+        </section>
+
+        <section id="tab-orders" class="tab-panel hidden"><div class="panel-head"><div><h2>订单</h2><p>用于核对支付接入后的订单状态；当前不提供人工改单。</p></div></div><div class="table-wrap"><table><thead><tr><th>订单号</th><th>用户</th><th>商品</th><th>金额</th><th>状态</th><th>创建 / 失效</th></tr></thead><tbody id="orders-table"></tbody></table></div></section>
+        <section id="tab-audit" class="tab-panel hidden"><div class="panel-head"><div><h2>操作日志</h2><p>记录后台登录、体验码发放/撤销及人工补发权益。</p></div></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>动作</th><th>对象</th><th>详情</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
+      </section>
+    </main>
+    <dialog id="grant-dialog"><form id="grant-form" method="dialog" class="form-card"><h2>补发面试次数</h2><p id="grant-user"></p><label>次数<input name="count" type="number" min="1" max="100" value="1" required /></label><label>有效期（天）<input name="expiresInDays" type="number" min="1" max="365" value="30" required /></label><label>原因<input name="reason" maxlength="100" placeholder="如：客服补偿" required /></label><div class="dialog-actions"><button type="button" class="secondary" id="cancel-grant">取消</button><button type="submit">确认补发</button></div></form></dialog>
+    <script src="/admin/app.js"></script>
+  </body>
+</html>

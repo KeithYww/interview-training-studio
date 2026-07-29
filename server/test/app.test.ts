@@ -60,6 +60,65 @@ test('QQ 登录限制和一次性验证码', async () => {
   await app.close()
 })
 
+test('运营后台需要独立登录，并能审计体验码和人工补发权益', async () => {
+  const app = buildApp({
+    secret: 'test',
+    adminSecret: 'legacy-secret',
+    adminPassword: 'console-password',
+    devCodes: true
+  })
+  await app.ready()
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/admin/overview' })).statusCode, 401)
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/admin/auth/login',
+        payload: { password: 'wrong-password' }
+      })
+    ).statusCode,
+    401
+  )
+  const adminLogin = await app.inject({
+    method: 'POST',
+    url: '/v1/admin/auth/login',
+    payload: { password: 'console-password' }
+  })
+  assert.equal(adminLogin.statusCode, 200)
+  const adminToken = adminLogin.json().accessToken as string
+  const adminAuth = auth(adminToken)
+  const generated = await app.inject({
+    method: 'POST',
+    url: '/v1/admin/activation-codes/generate',
+    headers: adminAuth,
+    payload: { count: 1, expiresInDays: 30, label: '后台测试' }
+  })
+  assert.equal(generated.statusCode, 200)
+  assert.equal(generated.json().codes.length, 1)
+  const codeList = await app.inject({
+    method: 'GET',
+    url: '/v1/admin/activation-codes',
+    headers: adminAuth
+  })
+  assert.equal(codeList.json().codes[0].label, '后台测试')
+  assert.equal(codeList.json().codes[0].codeHint.includes('••••'), true)
+  const userLogin = await login(app, 'operator-test@qq.com')
+  const user = (
+    await app.inject({ method: 'GET', url: '/v1/admin/users', headers: adminAuth })
+  ).json().users.find((candidate: { email: string }) => candidate.email === 'operator-test@qq.com')
+  const grant = await app.inject({
+    method: 'POST',
+    url: `/v1/admin/users/${user.id}/passes`,
+    headers: adminAuth,
+    payload: { count: 2, expiresInDays: 30, reason: '客服补偿' }
+  })
+  assert.equal(grant.statusCode, 200)
+  assert.equal(grant.json().entitlements.passes.available, 2)
+  const audit = await app.inject({ method: 'GET', url: '/v1/admin/audit-events', headers: adminAuth })
+  assert.equal(audit.json().events.some((event: { action: string }) => event.action === 'pass.granted'), true)
+  await app.close()
+})
+
 test('生产模式通过邮件发送验证码且接口不返回明文', async () => {
   let delivered: { to: string; code: string } | undefined
   const app = buildApp({

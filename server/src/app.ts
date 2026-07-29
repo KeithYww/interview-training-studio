@@ -32,13 +32,25 @@ type EmailCode = { hash: string; expiresAt: number; attempts: number; lastSentAt
 export type PassBalance = {
   count: number
   expiresAt: number
-  kind?: 'paid' | 'activation'
+  kind?: 'paid' | 'activation' | 'manual'
 }
 export type ActivationCode = {
   createdAt: string
   expiresAt: string
+  batchId?: string
+  label?: string
+  codeHint?: string
   redeemedAt?: string
   redeemedBy?: string
+  revokedAt?: string
+  revokedReason?: string
+}
+export type AdminAuditEvent = {
+  id: string
+  action: string
+  createdAt: string
+  target?: string
+  detail?: Record<string, string | number | boolean | undefined>
 }
 type AsrSession = {
   id: string
@@ -85,6 +97,7 @@ export class MemoryRepository {
   voiceUses = new Map<string, number>()
   passes = new Map<string, PassBalance[]>()
   activationCodes = new Map<string, ActivationCode>()
+  adminAuditEvents: AdminAuditEvent[] = []
   sessions = new Map<string, Session>()
   orders = new Map<string, Order>()
   checkoutKeys = new Map<string, string>()
@@ -129,6 +142,7 @@ export function buildApp(
     asrProvider?: AsrProvider
     visionProvider?: VisionProvider
     adminSecret?: string
+    adminPassword?: string
   } = {}
 ) {
   const secret = options.secret ?? process.env.APP_SECRET ?? 'local-development-secret'
@@ -138,6 +152,10 @@ export function buildApp(
     process.env.APP_SECRET?.trim() ||
     secret
   const devCodes = options.devCodes ?? process.env.DEV_EMAIL_CODES !== 'false'
+  const adminPassword =
+    options.adminPassword?.trim() ||
+    process.env.ADMIN_CONSOLE_PASSWORD?.trim() ||
+    process.env.ACTIVATION_ADMIN_SECRET?.trim()
   const repo = options.repository ?? new MemoryRepository()
   const emailSender = options.emailSender
   const asrProvider = options.asrProvider
@@ -152,7 +170,7 @@ export function buildApp(
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
     return `${body}.${createHmac('sha256', secret).update(body).digest('base64url')}`
   }
-  const verify = (token: string) => {
+  const verify = (token: string): Record<string, unknown> | undefined => {
     const [body, signature] = token.split('.')
     if (!body || !signature) return undefined
     const expected = createHmac('sha256', secret).update(body).digest('base64url')
@@ -162,11 +180,8 @@ export function buildApp(
     )
       return undefined
     try {
-      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
-        sub: string
-        exp: number
-      }
-      return payload.exp > now() ? payload : undefined
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as Record<string, unknown>
+      return typeof payload.exp === 'number' && payload.exp > now() ? payload : undefined
     } catch {
       return undefined
     }
@@ -180,7 +195,7 @@ export function buildApp(
   const getUser = (request: FastifyRequest) => {
     const token = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1]
     const payload = token && verify(token)
-    return payload ? repo.users.get(payload.sub) : undefined
+    return payload && typeof payload.sub === 'string' ? repo.users.get(payload.sub) : undefined
   }
   const requireUser = (
     request: FastifyRequest,
@@ -202,6 +217,27 @@ export function buildApp(
     }
     return true
   }
+  const getAdmin = (request: FastifyRequest) => {
+    const token = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1]
+    const payload = token && verify(token)
+    return payload?.role === 'admin' ? payload : undefined
+  }
+  const requireAdminSession = (
+    request: FastifyRequest,
+    reply: Parameters<typeof error>[0]
+  ): boolean => {
+    if (getAdmin(request)) return true
+    error(reply, 401, 'ADMIN_AUTH_REQUIRED', '请先登录后台管理')
+    return false
+  }
+  const addAudit = (
+    action: string,
+    target?: string,
+    detail?: AdminAuditEvent['detail']
+  ) => {
+    repo.adminAuditEvents.unshift({ id: id('audit'), action, target, detail, createdAt: iso() })
+    repo.adminAuditEvents.splice(500, Number.MAX_SAFE_INTEGER)
+  }
   const redemptionAttempts = new Map<string, number[]>()
   const activeSession = (userId: string) =>
     [...repo.sessions.values()].find(
@@ -211,7 +247,9 @@ export function buildApp(
     (repo.passes.get(userId) ?? []).filter((p) => p.expiresAt > now() && p.count > 0)
   const passCount = (userId: string, kind: 'paid' | 'activation') =>
     activePasses(userId)
-      .filter((pass) => (pass.kind ?? 'paid') === kind)
+      .filter((pass) =>
+        kind === 'paid' ? (pass.kind ?? 'paid') !== 'activation' : pass.kind === 'activation'
+      )
       .reduce((sum, pass) => sum + pass.count, 0)
   const entitlement = (user: User) => ({
     user,
@@ -462,11 +500,200 @@ export function buildApp(
     await repo.persist()
     return tokens
   })
-  app.post('/v1/admin/activation-codes', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return
-    const { count: requestedCount, expiresInDays: requestedExpiry } = (request.body ?? {}) as {
+  const adminLoginAttempts = new Map<string, number[]>()
+  app.post('/v1/admin/auth/login', async (request, reply) => {
+    if (!adminPassword)
+      return error(reply, 503, 'ADMIN_CONSOLE_DISABLED', '后台管理尚未配置独立登录密码')
+    const attempts = (adminLoginAttempts.get(request.ip) ?? []).filter(
+      (attemptAt) => now() - attemptAt < 10 * 60_000
+    )
+    if (attempts.length >= 5)
+      return error(reply, 429, 'RATE_LIMITED', '登录尝试过多，请 10 分钟后再试')
+    const { password } = (request.body ?? {}) as { password?: unknown }
+    if (
+      typeof password !== 'string' ||
+      password.length !== adminPassword.length ||
+      !timingSafeEqual(Buffer.from(password), Buffer.from(adminPassword))
+    ) {
+      attempts.push(now())
+      adminLoginAttempts.set(request.ip, attempts)
+      return error(reply, 401, 'ADMIN_AUTH_FAILED', '管理密码不正确')
+    }
+    adminLoginAttempts.delete(request.ip)
+    addAudit('admin.login', undefined, { ip: request.ip })
+    await repo.persist()
+    return { accessToken: sign({ role: 'admin', exp: now() + 8 * 60 * 60_000 }), expiresInSeconds: 28800 }
+  })
+  app.get('/v1/admin/overview', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const users = [...repo.users.values()]
+    const orders = [...repo.orders.values()]
+    const codes = [...repo.activationCodes.values()]
+    const today = new Date().toISOString().slice(0, 10)
+    return {
+      metrics: {
+        totalUsers: users.length,
+        newUsersToday: users.filter((user) => user.createdAt.slice(0, 10) === today).length,
+        activeSessions: [...repo.sessions.values()].filter(
+          (session) => !session.stoppedAt && Date.parse(session.expiresAt) > now()
+        ).length,
+        paidOrders: orders.filter((order) => order.status === 'paid').length,
+        paidRevenueFen: orders
+          .filter((order) => order.status === 'paid')
+          .reduce((sum, order) => sum + order.amountFen, 0),
+        pendingOrders: orders.filter(
+          (order) => order.status === 'pending' && Date.parse(order.expiresAt) > now()
+        ).length,
+        activationCodes: {
+          total: codes.length,
+          redeemed: codes.filter((code) => Boolean(code.redeemedAt)).length,
+          valid: codes.filter(
+            (code) => !code.redeemedAt && !code.revokedAt && Date.parse(code.expiresAt) > now()
+          ).length
+        }
+      },
+      generatedAt: iso()
+    }
+  })
+  app.get('/v1/admin/users', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const { query, limit } = request.query as { query?: string; limit?: string }
+    const normalizedQuery = query?.trim().toLowerCase() ?? ''
+    const requestedLimit = Number(limit ?? 50)
+    const safeLimit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50
+    const users = [...repo.users.values()]
+      .filter((user) => !normalizedQuery || user.email.includes(normalizedQuery) || user.id.includes(normalizedQuery))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, safeLimit)
+      .map((user) => ({
+        ...user,
+        trialUsed: repo.trialUsed.has(user.id),
+        voiceTrialRemaining: Math.max(0, 3 - (repo.voiceUses.get(user.id) ?? 0)),
+        passes: {
+          total: activePasses(user.id).reduce((sum, pass) => sum + pass.count, 0),
+          paid: passCount(user.id, 'paid'),
+          activation: passCount(user.id, 'activation')
+        },
+        activeSession: activeSession(user.id) ?? null
+      }))
+    return { users, total: users.length }
+  })
+  app.get('/v1/admin/orders', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const { status, limit } = request.query as { status?: string; limit?: string }
+    const requestedLimit = Number(limit ?? 100)
+    const safeLimit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 100
+    const orders = [...repo.orders.values()]
+      .filter((order) => !status || order.status === status)
+      .sort((left, right) => right.expiresAt.localeCompare(left.expiresAt))
+      .slice(0, safeLimit)
+      .map((order) => ({ ...order, userEmail: repo.users.get(order.userId)?.email ?? '已删除用户' }))
+    return { orders, total: orders.length }
+  })
+  app.get('/v1/admin/activation-codes', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const codes = [...repo.activationCodes.entries()]
+      .map(([codeHash, code]) => ({
+        id: `code_${codeHash.slice(0, 12)}`,
+        codeHint: code.codeHint ?? '历史体验码',
+        batchId: code.batchId ?? 'legacy',
+        label: code.label ?? '',
+        createdAt: code.createdAt,
+        expiresAt: code.expiresAt,
+        redeemedAt: code.redeemedAt ?? null,
+        redeemedBy: code.redeemedBy ? repo.users.get(code.redeemedBy)?.email ?? '已删除用户' : null,
+        revokedAt: code.revokedAt ?? null
+      }))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 200)
+    return { codes, total: codes.length }
+  })
+  app.get('/v1/admin/audit-events', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    return { events: repo.adminAuditEvents.slice(0, 100) }
+  })
+  app.post('/v1/admin/users/:id/passes', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const user = repo.users.get((request.params as { id: string }).id)
+    if (!user) return error(reply, 404, 'USER_NOT_FOUND', '用户不存在')
+    const { count, expiresInDays, reason } = (request.body ?? {}) as {
       count?: unknown
       expiresInDays?: unknown
+      reason?: unknown
+    }
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 100)
+      return error(reply, 400, 'INVALID_COUNT', '补发次数需为 1 到 100')
+    if (
+      typeof expiresInDays !== 'number' ||
+      !Number.isInteger(expiresInDays) ||
+      expiresInDays < 1 ||
+      expiresInDays > 365
+    )
+      return error(reply, 400, 'INVALID_EXPIRY', '有效期需为 1 到 365 天')
+    const safeReason = typeof reason === 'string' ? reason.trim().slice(0, 100) : ''
+    repo.passes.set(user.id, [
+      ...(repo.passes.get(user.id) ?? []),
+      { count, expiresAt: now() + expiresInDays * 86400_000, kind: 'manual' }
+    ])
+    addAudit('pass.granted', user.email, { count, expiresInDays, reason: safeReason || '未填写' })
+    await repo.persist()
+    return { granted: true, entitlements: entitlement(user) }
+  })
+  app.post('/v1/admin/activation-codes/generate', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const { count: requestedCount, expiresInDays: requestedExpiry, label } = (request.body ?? {}) as {
+      count?: unknown
+      expiresInDays?: unknown
+      label?: unknown
+    }
+    const count =
+      typeof requestedCount === 'number' && Number.isInteger(requestedCount) ? requestedCount : 1
+    const expiresInDays =
+      typeof requestedExpiry === 'number' && Number.isInteger(requestedExpiry) ? requestedExpiry : 30
+    if (count < 1 || count > 100)
+      return error(reply, 400, 'INVALID_COUNT', '每次可生成 1 到 100 个体验码')
+    if (expiresInDays < 1 || expiresInDays > 365)
+      return error(reply, 400, 'INVALID_EXPIRY', '体验码有效期需为 1 到 365 天')
+    const safeLabel = typeof label === 'string' ? label.trim().slice(0, 60) : ''
+    const expiresAt = iso(now() + expiresInDays * 86400_000)
+    const batchId = id('batch')
+    const codes: string[] = []
+    while (codes.length < count) {
+      const code = activationCode()
+      const codeHash = hash(normalizeActivationCode(code))
+      if (repo.activationCodes.has(codeHash)) continue
+      repo.activationCodes.set(codeHash, {
+        createdAt: iso(),
+        expiresAt,
+        batchId,
+        label: safeLabel,
+        codeHint: `••••${code.slice(-4)}`
+      })
+      codes.push(code)
+    }
+    addAudit('activation.generated', batchId, { count, expiresInDays, label: safeLabel || '未命名' })
+    await repo.persist()
+    return { codes, batchId, expiresAt, benefit: { screenshotMinutes: 60, voiceMinutes: 45 } }
+  })
+  app.post('/v1/admin/activation-codes/revoke', async (request, reply) => {
+    if (!requireAdminSession(request, reply)) return
+    const { code, reason } = (request.body ?? {}) as { code?: unknown; reason?: unknown }
+    if (typeof code !== 'string') return error(reply, 400, 'INVALID_ACTIVATION_CODE', '体验码格式不正确')
+    const record = repo.activationCodes.get(hash(normalizeActivationCode(code)))
+    if (!record) return error(reply, 404, 'ACTIVATION_CODE_NOT_FOUND', '未找到体验码')
+    if (record.redeemedAt) return error(reply, 409, 'ACTIVATION_CODE_USED', '已兑换的体验码不能撤销')
+    record.revokedAt = iso()
+    record.revokedReason = typeof reason === 'string' ? reason.trim().slice(0, 100) : ''
+    addAudit('activation.revoked', record.codeHint, { reason: record.revokedReason || '未填写' })
+    await repo.persist()
+    return { revoked: true }
+  })
+  app.post('/v1/admin/activation-codes', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return
+    const { count: requestedCount, expiresInDays: requestedExpiry, label } = (request.body ?? {}) as {
+      count?: unknown
+      expiresInDays?: unknown
+      label?: unknown
     }
     const count =
       typeof requestedCount === 'number' && Number.isInteger(requestedCount) ? requestedCount : 1
@@ -480,16 +707,26 @@ export function buildApp(
       return error(reply, 400, 'INVALID_EXPIRY', '体验码有效期需为 1 到 365 天')
 
     const expiresAt = iso(now() + expiresInDays * 86400_000)
+    const batchId = id('batch')
+    const safeLabel = typeof label === 'string' ? label.trim().slice(0, 60) : ''
     const codes: string[] = []
     while (codes.length < count) {
       const code = activationCode()
       const codeHash = hash(normalizeActivationCode(code))
       if (repo.activationCodes.has(codeHash)) continue
-      repo.activationCodes.set(codeHash, { createdAt: iso(), expiresAt })
+      repo.activationCodes.set(codeHash, {
+        createdAt: iso(),
+        expiresAt,
+        batchId,
+        label: safeLabel,
+        codeHint: `••••${code.slice(-4)}`
+      })
       codes.push(code)
     }
     await repo.persist()
-    return { codes, expiresAt, benefit: { screenshotMinutes: 60, voiceMinutes: 45 } }
+    addAudit('activation.generated', batchId, { count, expiresInDays, label: safeLabel || '未命名' })
+    await repo.persist()
+    return { codes, batchId, expiresAt, benefit: { screenshotMinutes: 60, voiceMinutes: 45 } }
   })
   app.post('/v1/activation-codes/redeem', async (request, reply) => {
     const user = requireUser(request, reply)
@@ -511,6 +748,7 @@ export function buildApp(
       return error(reply, 400, 'INVALID_ACTIVATION_CODE', '体验码格式不正确')
     const record = repo.activationCodes.get(hash(normalizeActivationCode(code)))
     if (!record) return error(reply, 400, 'INVALID_ACTIVATION_CODE', '体验码无效')
+    if (record.revokedAt) return error(reply, 410, 'ACTIVATION_CODE_REVOKED', '该体验码已被撤销')
     if (record.redeemedAt) return error(reply, 409, 'ACTIVATION_CODE_USED', '该体验码已被使用')
     if (Date.parse(record.expiresAt) <= now())
       return error(reply, 410, 'ACTIVATION_CODE_EXPIRED', '该体验码已过期')
