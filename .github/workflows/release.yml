@@ -64,12 +64,28 @@ jobs:
           path: ./dist
 
       - name: Create GitHub Release
+        run: |
+          set -euo pipefail
+          dmg_x64="$(find dist -type f -name '*-x64.dmg' | head -1)"
+          dmg_arm64="$(find dist -type f -name '*-arm64.dmg' | head -1)"
+          exe="$(find dist -type f -name '*setup.exe' | head -1)"
+          test -f "$dmg_x64"
+          test -f "$dmg_arm64"
+          test -f "$exe"
+          cp "$dmg_x64" dist/offerGet-mac-x64.dmg
+          cp "$dmg_arm64" dist/offerGet-mac-arm64.dmg
+          cp "$exe" dist/offerGet-windows.exe
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           files: |
             dist/**/*.dmg
             dist/**/*setup.exe
+            dist/offerGet-mac-x64.dmg
+            dist/offerGet-mac-arm64.dmg
+            dist/offerGet-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
