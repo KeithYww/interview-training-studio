@@ -53,7 +53,9 @@ async function openSystemAudioStream(): Promise<MediaStream> {
   stream.getVideoTracks().forEach((t) => t.stop())
   if (stream.getAudioTracks().length === 0) {
     stream.getTracks().forEach((t) => t.stop())
-    throw new Error('未获取到电脑声音，请在系统共享窗口中勾选“共享系统音频”后重试')
+    throw new Error(
+      '未获取到电脑声音。请确认已在 macOS“屏幕与系统音频录制”中允许 offerGet，然后完全退出并重新打开应用'
+    )
   }
   return stream
 }
@@ -74,21 +76,19 @@ export async function startAudioCapture(): Promise<void> {
   if (audioInputDeviceId) {
     try {
       stream = await openMicrophoneStream(audioInputDeviceId)
-    } catch (error) {
-      console.warn('Failed to open selected audio input, falling back to microphone:', error)
-      stream = await openMicrophoneStream()
+    } catch {
+      throw new Error('所选音频输入不可用，请在设置中改为“电脑声音（推荐）”后重试')
     }
   } else {
-    try {
-      stream = await openSystemAudioStream()
-    } catch (error) {
-      console.warn('Failed to capture system audio, falling back to microphone:', error)
-      stream = await openMicrophoneStream()
-    }
+    // Keep the original product behaviour: interview questions are normally played
+    // through the computer speakers, so defaulting to a microphone on failure makes
+    // the UI look active while silently missing the interviewer.
+    stream = await openSystemAudioStream()
   }
   mediaStream = stream
 
   audioContext = new AudioContext({ sampleRate: 16000 })
+  await audioContext.resume()
 
   const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
 
