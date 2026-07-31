@@ -15,24 +15,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Download release installers
+      - name: Resolve signed release asset URLs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir dist \
-            --pattern 'offerGet-mac-x64.dmg' \
-            --pattern 'offerGet-mac-arm64.dmg' \
-            --pattern 'offerGet-windows.exe'
-          (
-            cd dist
-            sha256sum offerGet-mac-x64.dmg offerGet-mac-arm64.dmg offerGet-windows.exe \
-              > offerGet-SHA256SUMS
-          )
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          resolve_asset() {
+            local name="$1"
+            local prefix="$2"
+            local api_url digest signed_url
+            api_url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url' <<<"$release_json")"
+            digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+            test -n "$api_url"
+            test "$api_url" != null
+            test "$digest" != null
+            signed_url="$(
+              curl -sS --max-redirs 0 -o /dev/null -D - \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/octet-stream' \
+                "$api_url" |
+                awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/\r$/, "", $2); print $2 }'
+            )"
+            test -n "$signed_url"
+            {
+              printf '%s_URL<<SIGNED_URL\n%s\nSIGNED_URL\n' "$prefix" "$signed_url"
+              printf '%s_SHA=%s\n' "$prefix" "${digest#sha256:}"
+            } >> "$GITHUB_ENV"
+          }
+          resolve_asset offerGet-mac-x64.dmg MAC_X64
+          resolve_asset offerGet-mac-arm64.dmg MAC_ARM64
+          resolve_asset offerGet-windows.exe WINDOWS
 
       - name: Configure China deployment SSH
         env:
@@ -50,6 +64,12 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.CHINA_SSH_HOST }}
           SSH_USER: ${{ secrets.CHINA_SSH_USER }}
+          MAC_X64_URL: ${{ env.MAC_X64_URL }}
+          MAC_X64_SHA: ${{ env.MAC_X64_SHA }}
+          MAC_ARM64_URL: ${{ env.MAC_ARM64_URL }}
+          MAC_ARM64_SHA: ${{ env.MAC_ARM64_SHA }}
+          WINDOWS_URL: ${{ env.WINDOWS_URL }}
+          WINDOWS_SHA: ${{ env.WINDOWS_SHA }}
         run: |
           set -euo pipefail
           ssh_opts=(
@@ -61,17 +81,43 @@ jobs:
             -o ServerAliveInterval=15
             -o ServerAliveCountMax=4
           )
-          scp "${ssh_opts[@]}" \
-            dist/offerGet-mac-x64.dmg \
-            dist/offerGet-mac-arm64.dmg \
-            dist/offerGet-windows.exe \
-            dist/offerGet-SHA256SUMS \
-            "$SSH_USER@$SSH_HOST:/tmp/"
-          ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
-            'cd /tmp &&
-             sha256sum -c offerGet-SHA256SUMS &&
-             sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac-x64.dmg &&
-             sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg &&
-             sudo install -m 644 offerGet-mac-arm64.dmg /opt/offerget/shared/downloads/offerGet-mac-arm64.dmg &&
-             sudo install -m 644 offerGet-windows.exe /opt/offerget/shared/downloads/offerGet-windows.exe &&
-             rm -f offerGet-mac-x64.dmg offerGet-mac-arm64.dmg offerGet-windows.exe offerGet-SHA256SUMS'
+          payload="$(
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
+              "$MAC_X64_URL" "$MAC_X64_SHA" \
+              "$MAC_ARM64_URL" "$MAC_ARM64_SHA" \
+              "$WINDOWS_URL" "$WINDOWS_SHA" |
+              base64 -w 0
+          )"
+          ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$payload" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          mapfile -t release_values < <(printf '%s' "$1" | base64 -d)
+          mac_x64_url="${release_values[0]}"
+          mac_x64_sha="${release_values[1]}"
+          mac_arm64_url="${release_values[2]}"
+          mac_arm64_sha="${release_values[3]}"
+          windows_url="${release_values[4]}"
+          windows_sha="${release_values[5]}"
+          cd /tmp
+          curl_opts=(
+            --fail
+            --location
+            --retry 5
+            --retry-all-errors
+            --connect-timeout 20
+            --speed-limit 1024
+            --speed-time 60
+          )
+          curl "${curl_opts[@]}" -o offerGet-mac-x64.dmg "$mac_x64_url"
+          curl "${curl_opts[@]}" -o offerGet-mac-arm64.dmg "$mac_arm64_url"
+          curl "${curl_opts[@]}" -o offerGet-windows.exe "$windows_url"
+          printf '%s  %s\n' \
+            "$mac_x64_sha" offerGet-mac-x64.dmg \
+            "$mac_arm64_sha" offerGet-mac-arm64.dmg \
+            "$windows_sha" offerGet-windows.exe |
+            sha256sum -c -
+          sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac-x64.dmg
+          sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg
+          sudo install -m 644 offerGet-mac-arm64.dmg /opt/offerget/shared/downloads/offerGet-mac-arm64.dmg
+          sudo install -m 644 offerGet-windows.exe /opt/offerget/shared/downloads/offerGet-windows.exe
+          rm -f offerGet-mac-x64.dmg offerGet-mac-arm64.dmg offerGet-windows.exe
+          REMOTE_SCRIPT
