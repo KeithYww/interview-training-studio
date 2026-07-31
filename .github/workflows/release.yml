@@ -81,8 +81,9 @@ jobs:
         with:
           draft: false
           files: |
-            dist/**/*.dmg
-            dist/**/*setup.exe
+            dist/electron-build-macos-intel/*.dmg
+            dist/electron-build-macos-apple-silicon/*.dmg
+            dist/electron-build-windows/*setup.exe
             dist/offerGet-mac-x64.dmg
             dist/offerGet-mac-arm64.dmg
             dist/offerGet-windows.exe
