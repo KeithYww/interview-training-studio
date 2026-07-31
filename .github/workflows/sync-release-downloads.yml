@@ -1,0 +1,77 @@
+name: Sync Release Downloads
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v1.8.15
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download release installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir dist \
+            --pattern 'offerGet-mac-x64.dmg' \
+            --pattern 'offerGet-mac-arm64.dmg' \
+            --pattern 'offerGet-windows.exe'
+          (
+            cd dist
+            sha256sum offerGet-mac-x64.dmg offerGet-mac-arm64.dmg offerGet-windows.exe \
+              > offerGet-SHA256SUMS
+          )
+
+      - name: Configure China deployment SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CHINA_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CHINA_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/offerget_deploy
+          chmod 600 ~/.ssh/offerget_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Publish and verify installers
+        env:
+          SSH_HOST: ${{ secrets.CHINA_SSH_HOST }}
+          SSH_USER: ${{ secrets.CHINA_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(
+            -i ~/.ssh/offerget_deploy
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o ConnectTimeout=20
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=4
+          )
+          scp "${ssh_opts[@]}" \
+            dist/offerGet-mac-x64.dmg \
+            dist/offerGet-mac-arm64.dmg \
+            dist/offerGet-windows.exe \
+            dist/offerGet-SHA256SUMS \
+            "$SSH_USER@$SSH_HOST:/tmp/"
+          ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
+            'cd /tmp &&
+             sha256sum -c offerGet-SHA256SUMS &&
+             sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac-x64.dmg &&
+             sudo install -m 644 offerGet-mac-x64.dmg /opt/offerget/shared/downloads/offerGet-mac.dmg &&
+             sudo install -m 644 offerGet-mac-arm64.dmg /opt/offerget/shared/downloads/offerGet-mac-arm64.dmg &&
+             sudo install -m 644 offerGet-windows.exe /opt/offerget/shared/downloads/offerGet-windows.exe &&
+             rm -f offerGet-mac-x64.dmg offerGet-mac-arm64.dmg offerGet-windows.exe offerGet-SHA256SUMS'
