@@ -13,7 +13,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Resolve signed release asset URLs
         env:
@@ -25,12 +25,14 @@ jobs:
           resolve_asset() {
             local name="$1"
             local prefix="$2"
-            local api_url digest signed_url
+            local api_url digest size signed_url
             api_url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url' <<<"$release_json")"
             digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+            size="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .size' <<<"$release_json")"
             test -n "$api_url"
             test "$api_url" != null
             test "$digest" != null
+            test "$size" != null
             signed_url="$(
               curl -sS --max-redirs 0 -o /dev/null -D - \
                 -H "Authorization: Bearer $GH_TOKEN" \
@@ -42,6 +44,7 @@ jobs:
             {
               printf '%s_URL<<SIGNED_URL\n%s\nSIGNED_URL\n' "$prefix" "$signed_url"
               printf '%s_SHA=%s\n' "$prefix" "${digest#sha256:}"
+              printf '%s_SIZE=%s\n' "$prefix" "$size"
             } >> "$GITHUB_ENV"
           }
           resolve_asset offerGet-mac-x64.dmg MAC_X64
@@ -66,10 +69,13 @@ jobs:
           SSH_USER: ${{ secrets.CHINA_SSH_USER }}
           MAC_X64_URL: ${{ env.MAC_X64_URL }}
           MAC_X64_SHA: ${{ env.MAC_X64_SHA }}
+          MAC_X64_SIZE: ${{ env.MAC_X64_SIZE }}
           MAC_ARM64_URL: ${{ env.MAC_ARM64_URL }}
           MAC_ARM64_SHA: ${{ env.MAC_ARM64_SHA }}
+          MAC_ARM64_SIZE: ${{ env.MAC_ARM64_SIZE }}
           WINDOWS_URL: ${{ env.WINDOWS_URL }}
           WINDOWS_SHA: ${{ env.WINDOWS_SHA }}
+          WINDOWS_SIZE: ${{ env.WINDOWS_SIZE }}
         run: |
           set -euo pipefail
           ssh_opts=(
@@ -82,10 +88,10 @@ jobs:
             -o ServerAliveCountMax=4
           )
           payload="$(
-            printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
-              "$MAC_X64_URL" "$MAC_X64_SHA" \
-              "$MAC_ARM64_URL" "$MAC_ARM64_SHA" \
-              "$WINDOWS_URL" "$WINDOWS_SHA" |
+            printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+              "$MAC_X64_URL" "$MAC_X64_SHA" "$MAC_X64_SIZE" \
+              "$MAC_ARM64_URL" "$MAC_ARM64_SHA" "$MAC_ARM64_SIZE" \
+              "$WINDOWS_URL" "$WINDOWS_SHA" "$WINDOWS_SIZE" |
               base64 -w 0
           )"
           ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$payload" <<'REMOTE_SCRIPT'
@@ -93,10 +99,13 @@ jobs:
           mapfile -t release_values < <(printf '%s' "$1" | base64 -d)
           mac_x64_url="${release_values[0]}"
           mac_x64_sha="${release_values[1]}"
-          mac_arm64_url="${release_values[2]}"
-          mac_arm64_sha="${release_values[3]}"
-          windows_url="${release_values[4]}"
-          windows_sha="${release_values[5]}"
+          mac_x64_size="${release_values[2]}"
+          mac_arm64_url="${release_values[3]}"
+          mac_arm64_sha="${release_values[4]}"
+          mac_arm64_size="${release_values[5]}"
+          windows_url="${release_values[6]}"
+          windows_sha="${release_values[7]}"
+          windows_size="${release_values[8]}"
           cd /tmp
           curl_opts=(
             --fail
@@ -107,9 +116,27 @@ jobs:
             --speed-limit 1024
             --speed-time 60
           )
-          curl "${curl_opts[@]}" -o offerGet-mac-x64.dmg "$mac_x64_url"
-          curl "${curl_opts[@]}" -o offerGet-mac-arm64.dmg "$mac_arm64_url"
-          curl "${curl_opts[@]}" -o offerGet-windows.exe "$windows_url"
+          download_release_asset() {
+            local url="$1"
+            local expected_size="$2"
+            local file="$3"
+            local current_size=0
+            if [[ -f "$file" ]]; then
+              current_size="$(stat -c %s "$file")"
+            fi
+            if [[ "$current_size" == "$expected_size" ]]; then
+              printf '%s is already complete (%s bytes)\n' "$file" "$expected_size"
+              return
+            fi
+            if (( current_size > expected_size )); then
+              rm -f "$file"
+            fi
+            curl "${curl_opts[@]}" --continue-at - -o "$file" "$url"
+            test "$(stat -c %s "$file")" = "$expected_size"
+          }
+          download_release_asset "$mac_x64_url" "$mac_x64_size" offerGet-mac-x64.dmg
+          download_release_asset "$mac_arm64_url" "$mac_arm64_size" offerGet-mac-arm64.dmg
+          download_release_asset "$windows_url" "$windows_size" offerGet-windows.exe
           printf '%s  %s\n' \
             "$mac_x64_sha" offerGet-mac-x64.dmg \
             "$mac_arm64_sha" offerGet-mac-arm64.dmg \
