@@ -54,23 +54,15 @@ app.whenReady().then(() => {
   // A standard desktop app must remain visible in the Dock/taskbar.
   applyDockVisibility(false)
 
-  // Keep macOS on its native system picker. The forced CoreAudio loopback path
-  // introduced with Electron 39 can capture simple system sounds but misses
-  // output from some conferencing clients (including Tencent Meeting).
-  // Windows continues to use Electron's loopback capture without a picker.
-  session.defaultSession.setDisplayMediaRequestHandler(
-    (_request, callback) => {
-      desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-        if (sources.length > 0) {
-          callback({
-            video: sources[0],
-            ...(process.platform === 'win32' ? { audio: 'loopback' as const } : {})
-          })
-        }
-      })
-    },
-    { useSystemPicker: process.platform === 'darwin' }
-  )
+  // Match the upstream project: automatically approve screen capture and attach
+  // Electron's system-audio loopback source on every supported desktop platform.
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+      if (sources.length > 0) {
+        callback({ video: sources[0], audio: 'loopback' })
+      }
+    })
+  })
 
   // Auto-approve microphone access so users can enumerate and select audio input devices
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {

@@ -4,6 +4,16 @@ import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { reassertInterviewWindowOnTop } from './settings'
 
+export function applyContentProtection(window: BrowserWindow, forceReset = false): void {
+  if (!window || window.isDestroyed()) return
+
+  if (forceReset && process.platform === 'win32') {
+    window.setContentProtection(false)
+  }
+
+  window.setContentProtection(true)
+}
+
 export function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -31,11 +41,14 @@ export function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    applyContentProtection(mainWindow)
     reassertInterviewWindowOnTop()
-    // Standard visible desktop window; do not hide it from system UI or other apps.
   })
 
-  mainWindow.on('show', reassertInterviewWindowOnTop)
+  mainWindow.on('show', () => {
+    applyContentProtection(mainWindow)
+    reassertInterviewWindowOnTop()
+  })
   mainWindow.on('restore', reassertInterviewWindowOnTop)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

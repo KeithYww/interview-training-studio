@@ -86,7 +86,7 @@
     "@types/react-dom": "^19.1.6",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^39.8.10",
+    "electron": "^37.2.3",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "eslint": "^9.31.0",

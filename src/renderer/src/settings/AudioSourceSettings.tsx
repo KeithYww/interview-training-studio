@@ -10,7 +10,7 @@ import {
 import { useSettingsStore } from '@/lib/store/settings'
 
 export function AudioSourceSettings() {
-  const { audioInputDeviceId, updateSetting } = useSettingsStore()
+  const { audioInputDeviceId, audioOutputDeviceId, updateSetting } = useSettingsStore()
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
 
   useEffect(() => {
@@ -26,7 +26,7 @@ export function AudioSourceSettings() {
           permissionStream.getTracks().forEach((track) => track.stop())
           available = await navigator.mediaDevices.enumerateDevices()
         }
-        if (!cancelled) setDevices(available.filter((device) => device.kind === 'audioinput'))
+        if (!cancelled) setDevices(available)
       } catch (error) {
         console.warn('Unable to enumerate audio input devices:', error)
       }
@@ -44,33 +44,61 @@ export function AudioSourceSettings() {
         语音识别音源
       </h2>
       <p className="mb-4 text-sm text-slate-400">
-        默认直接捕获电脑声音，不需要选择共享窗口；也可以选择麦克风或虚拟音频设备。
+        与原版保持一致：默认捕获系统音频，也可以选择麦克风、虚拟音频设备和监听输出。
       </p>
-      <div className="flex items-center justify-between gap-6">
-        <div>
-          <div className="text-sm font-medium">音频输入</div>
-          <p className="mt-1 text-xs text-slate-500">
-            选择的设备不可用时，会自动回退到默认麦克风。
-          </p>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between gap-6">
+          <div>
+            <div className="text-sm font-medium">音频输入</div>
+            <p className="mt-1 text-xs text-slate-500">选择麦克风；默认捕获系统音频。</p>
+          </div>
+          <Select
+            value={audioInputDeviceId || 'system'}
+            onValueChange={(value) =>
+              updateSetting('audioInputDeviceId', value === 'system' ? '' : value)
+            }
+          >
+            <SelectTrigger className="w-72 border-white/10 bg-white/5">
+              <SelectValue placeholder="系统音频（默认）" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="system">系统音频（默认）</SelectItem>
+              {devices
+                .filter((device) => device.kind === 'audioinput')
+                .map((device) => (
+                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                    {device.label || `音频设备 ${device.deviceId.slice(0, 6)}`}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
         </div>
-        <Select
-          value={audioInputDeviceId || 'system'}
-          onValueChange={(value) =>
-            updateSetting('audioInputDeviceId', value === 'system' ? '' : value)
-          }
-        >
-          <SelectTrigger className="w-72 border-white/10 bg-white/5">
-            <SelectValue placeholder="电脑声音（推荐）" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="system">电脑声音（推荐）</SelectItem>
-            {devices.map((device) => (
-              <SelectItem key={device.deviceId} value={device.deviceId}>
-                {device.label || `音频设备 ${device.deviceId.slice(0, 6)}`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center justify-between gap-6">
+          <div>
+            <div className="text-sm font-medium">音频输出</div>
+            <p className="mt-1 text-xs text-slate-500">用于转录时的监听输出。</p>
+          </div>
+          <Select
+            value={audioOutputDeviceId || 'default'}
+            onValueChange={(value) =>
+              updateSetting('audioOutputDeviceId', value === 'default' ? '' : value)
+            }
+          >
+            <SelectTrigger className="w-72 border-white/10 bg-white/5">
+              <SelectValue placeholder="默认设备" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">默认设备</SelectItem>
+              {devices
+                .filter((device) => device.kind === 'audiooutput')
+                .map((device) => (
+                  <SelectItem key={device.deviceId} value={device.deviceId}>
+                    {device.label || `输出设备 ${device.deviceId.slice(0, 6)}`}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </section>
   )

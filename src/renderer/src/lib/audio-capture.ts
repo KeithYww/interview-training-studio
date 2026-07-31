@@ -3,19 +3,15 @@ import { useSettingsStore } from '@/lib/store/settings'
 let mediaStream: MediaStream | null = null
 let audioContext: AudioContext | null = null
 let processor: ScriptProcessorNode | null = null
-let silentGain: GainNode | null = null
 let deliveryEnabled = false
 let pendingAudio: ArrayBuffer[] = []
 let pendingAudioBytes = 0
 const MAX_PENDING_AUDIO_BYTES = 96 * 1024
 
-function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
-  const ratio = sourceRate / 16000
-  const length = ratio > 1 ? Math.max(1, Math.floor(float32.length / ratio)) : float32.length
-  const int16 = new Int16Array(length)
-  for (let i = 0; i < length; i++) {
-    const sourceIndex = ratio > 1 ? Math.min(float32.length - 1, Math.floor(i * ratio)) : i
-    const s = Math.max(-1, Math.min(1, float32[sourceIndex]))
+function downsampleAndSend(float32: Float32Array): void {
+  const int16 = new Int16Array(float32.length)
+  for (let i = 0; i < float32.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32[i]))
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
   }
   const chunk = int16.buffer
@@ -31,38 +27,17 @@ function downsampleAndSend(float32: Float32Array, sourceRate: number): void {
 }
 
 async function openSystemAudioStream(): Promise<MediaStream> {
-  const capture = navigator.mediaDevices.getDisplayMedia({
+  const stream = await navigator.mediaDevices.getDisplayMedia({
     audio: true,
     video: true
   })
-  let timeoutId = 0
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = window.setTimeout(() => reject(new Error('电脑声音捕获启动超时')), 5_000)
-  })
-  let stream: MediaStream
-  try {
-    stream = await Promise.race([capture, timeout])
-  } catch (error) {
-    void capture
-      .then((lateStream) => lateStream.getTracks().forEach((track) => track.stop()))
-      .catch(() => undefined)
-    throw error
-  } finally {
-    window.clearTimeout(timeoutId)
-  }
   stream.getVideoTracks().forEach((t) => t.stop())
-  if (stream.getAudioTracks().length === 0) {
-    stream.getTracks().forEach((t) => t.stop())
-    throw new Error(
-      '未获取到电脑声音。请确认已在 macOS“屏幕与系统音频录制”中允许 offerGet，然后完全退出并重新打开应用'
-    )
-  }
   return stream
 }
 
-async function openMicrophoneStream(deviceId?: string): Promise<MediaStream> {
+async function openMicrophoneStream(deviceId: string): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({
-    audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    audio: { deviceId: { exact: deviceId } },
     video: false
   })
 }
@@ -71,38 +46,40 @@ export async function startAudioCapture(): Promise<void> {
   deliveryEnabled = false
   pendingAudio = []
   pendingAudioBytes = 0
-  const { audioInputDeviceId } = useSettingsStore.getState()
+  const { audioInputDeviceId, audioOutputDeviceId } = useSettingsStore.getState()
   let stream: MediaStream
   if (audioInputDeviceId) {
     try {
       stream = await openMicrophoneStream(audioInputDeviceId)
-    } catch {
-      throw new Error('所选音频输入不可用，请在设置中改为“电脑声音（推荐）”后重试')
+    } catch (error) {
+      console.warn('Failed to open selected microphone, falling back to system audio:', error)
+      stream = await openSystemAudioStream()
     }
   } else {
-    // Keep the original product behaviour: interview questions are normally played
-    // through the computer speakers, so defaulting to a microphone on failure makes
-    // the UI look active while silently missing the interviewer.
     stream = await openSystemAudioStream()
   }
   mediaStream = stream
 
   audioContext = new AudioContext({ sampleRate: 16000 })
-  await audioContext.resume()
+
+  if (audioOutputDeviceId && 'setSinkId' in audioContext) {
+    try {
+      await (audioContext as AudioContext & { setSinkId: (id: string) => Promise<void> }).setSinkId(
+        audioOutputDeviceId
+      )
+    } catch (error) {
+      console.warn('Failed to set audio output device:', error)
+    }
+  }
 
   const source = audioContext.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
 
-  // 1024 samples at 16 kHz is about 64 ms. This keeps streaming latency low
-  // without creating excessive IPC/WebSocket overhead.
-  processor = audioContext.createScriptProcessor(1024, 1, 1)
+  processor = audioContext.createScriptProcessor(2048, 1, 1)
   processor.onaudioprocess = (e) => {
-    downsampleAndSend(e.inputBuffer.getChannelData(0), e.inputBuffer.sampleRate)
+    downsampleAndSend(e.inputBuffer.getChannelData(0))
   }
-  silentGain = audioContext.createGain()
-  silentGain.gain.value = 0
   source.connect(processor)
-  processor.connect(silentGain)
-  silentGain.connect(audioContext.destination)
+  processor.connect(audioContext.destination)
 }
 
 export function startAudioDelivery(): void {
@@ -119,10 +96,6 @@ export function stopAudioCapture(): void {
   if (processor) {
     processor.disconnect()
     processor = null
-  }
-  if (silentGain) {
-    silentGain.disconnect()
-    silentGain = null
   }
   if (audioContext) {
     audioContext.close()
