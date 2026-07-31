@@ -118,25 +118,76 @@ jobs:
           )
           download_release_asset() {
             local url="$1"
-            local expected_size="$2"
-            local file="$3"
+            local expected_sha="$2"
+            local expected_size="$3"
+            local file="$4"
             local current_size=0
+            local remaining chunk_size parts_dir combined
             if [[ -f "$file" ]]; then
               current_size="$(stat -c %s "$file")"
             fi
             if [[ "$current_size" == "$expected_size" ]]; then
-              printf '%s is already complete (%s bytes)\n' "$file" "$expected_size"
-              return
+              if printf '%s  %s\n' "$expected_sha" "$file" | sha256sum -c -; then
+                printf '%s is already complete (%s bytes)\n' "$file" "$expected_size"
+                return
+              fi
+              rm -f "$file"
+              current_size=0
             fi
             if (( current_size > expected_size )); then
               rm -f "$file"
+              current_size=0
             fi
-            curl "${curl_opts[@]}" --continue-at - -o "$file" "$url"
+            remaining=$((expected_size - current_size))
+            chunk_size=$(((remaining + 7) / 8))
+            parts_dir="${file}.parts"
+            mkdir -p "$parts_dir"
+            pids=()
+            part_files=()
+            for ((index = 0; index < 8; index++)); do
+              start=$((current_size + index * chunk_size))
+              ((start >= expected_size)) && break
+              end=$((start + chunk_size - 1))
+              ((end >= expected_size)) && end=$((expected_size - 1))
+              part="$parts_dir/$(printf '%02d' "$index")-$start-$end"
+              part_files+=("$part")
+              expected_part_size=$((end - start + 1))
+              if [[ -f "$part" ]] && [[ "$(stat -c %s "$part")" == "$expected_part_size" ]]; then
+                continue
+              fi
+              rm -f "$part"
+              curl "${curl_opts[@]}" --range "$start-$end" -o "$part" "$url" &
+              pids+=("$!")
+            done
+            for pid in "${pids[@]}"; do
+              wait "$pid"
+            done
+            combined="${file}.combined"
+            rm -f "$combined"
+            if [[ -f "$file" ]]; then
+              cp "$file" "$combined"
+            else
+              : > "$combined"
+            fi
+            for part in "${part_files[@]}"; do
+              range="${part##*/}"
+              range="${range#*-}"
+              start="${range%-*}"
+              end="${range#*-}"
+              test "$(stat -c %s "$part")" = "$((end - start + 1))"
+              cat "$part" >> "$combined"
+            done
+            mv "$combined" "$file"
+            rm -rf "$parts_dir"
             test "$(stat -c %s "$file")" = "$expected_size"
+            printf '%s  %s\n' "$expected_sha" "$file" | sha256sum -c -
           }
-          download_release_asset "$mac_x64_url" "$mac_x64_size" offerGet-mac-x64.dmg
-          download_release_asset "$mac_arm64_url" "$mac_arm64_size" offerGet-mac-arm64.dmg
-          download_release_asset "$windows_url" "$windows_size" offerGet-windows.exe
+          download_release_asset \
+            "$mac_x64_url" "$mac_x64_sha" "$mac_x64_size" offerGet-mac-x64.dmg
+          download_release_asset \
+            "$mac_arm64_url" "$mac_arm64_sha" "$mac_arm64_size" offerGet-mac-arm64.dmg
+          download_release_asset \
+            "$windows_url" "$windows_sha" "$windows_size" offerGet-windows.exe
           printf '%s  %s\n' \
             "$mac_x64_sha" offerGet-mac-x64.dmg \
             "$mac_arm64_sha" offerGet-mac-arm64.dmg \
